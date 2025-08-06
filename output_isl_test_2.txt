@@ -1,0 +1,78 @@
+showport output:
+0:1:1 | target | ready | 2FF70002AC07EFA3 | 20110002AC07EFF8 | host | FC | -
+0:1:2 | target | ready | 2FF70002AC07EFA3 | 20120002AC07EFF8 | host | FC | -
+0:1:3 | target | ready | 2FF70002AC07EFA3 | 20130002AC07EFF8 | host | FC | -
+0:1:4 | target | ready | 2FF70002AC07EFA3 | 20140002AC07EFF8 | host | FC | -
+
+
+showhost output:
+10000090FA23B100
+10000090FA23B101
+
+showportdev fcfabric 0:3:1 | grep "Online" command output:
+# Switch 1 ports
+10|10000000AAAA0001|F-Port|Online|32Gbps|10000090FA23B100|N-Port
+11|10000000AAAA0002|F-Port|Online|32Gbps|10000090FA23B101|N-Port
+20|10000000AAAA000A|E-Port|Online|16Gbps|10000000BBBB000A|E-Port
+21|10000000AAAA000B|E-Port|Online|16Gbps|10000000BBBB000B|E-Port
+
+# Switch 2 ports
+30|10000000BBBB0001|F-Port|Online|32Gbps|20110002AC07EFF8|N-Port
+31|10000000BBBB0002|F-Port|Online|32Gbps|20120002AC07EFF8|N-Port
+32|10000000BBBB0003|F-Port|Online|32Gbps|20130002AC07EFF8|N-Port
+33|10000000BBBB0004|F-Port|Online|32Gbps|20140002AC07EFF8|N-Port
+20|10000000BBBB000A|E-Port|Online|16Gbps|10000000AAAA000A|E-Port
+21|10000000BBBB000B|E-Port|Online|16Gbps|10000000AAAA000B|E-Port
+
+zoning info:
+zone host1_target1:
+10000090FA23B100
+20110002AC07EFF8
+
+zone host1_target2:
+10000090FA23B100
+20120002AC07EFF8
+
+zone host1_target3:
+10000090FA23B100
+20130002AC07EFF8
+
+zone host1_target4:
+10000090FA23B100
+20140002AC07EFF8
+
+zone host2_target1:
+10000090FA23B101
+20110002AC07EFF8
+
+zone host2_target2:
+10000090FA23B101
+20120002AC07EFF8
+
+zone host2_target3:
+10000090FA23B101
+20130002AC07EFF8
+
+zone host2_target4:
+10000090FA23B101
+20140002AC07EFF8
+
+Node information variables:
+node_count = 1
+node_version = 10.6.0.12
+
+
+host_info = SN1610Q FW:v9.12.01 DVR:v10.02.10.00-k1-debug
+
+Switch info:
+switch_name = 10000000AAAA0000
+switch_logical_name = switch_1
+switch_vendor = Brocade Communications, Inc.
+switch_model = G620
+switch_release = v9.1.1c
+
+switch_name = 10000000BBBB0000
+switch_logical_name = switch_2
+switch_vendor = Brocade Communications, Inc.
+switch_model = G620
+switch_release = v9.1.1c
