@@ -1,0 +1,48 @@
+
+showport output:
+0:4:1 | target | ready | 2FF70002AC07EFA3 | 20410002AC07EFF8 | host | FC | -
+0:4:2 | target | ready | 2FF70002AC07EFA3 | 20420002AC07EFF8 | host | FC | -
+1:4:1 | target | ready | 2FF70002AC07EFA3 | 21410002AC07EFF8 | host | FC | -
+1:4:2 | target | ready | 2FF70002AC07EFA3 | 21420002AC07EFF8 | host | FC | -
+
+
+showhost output:
+100008F1EAC0425A
+100008F1EAC0425B
+
+showportdev fcfabric 0:3:1 | grep "Online" command output:
+10|200AD81FCC524BB4|F-Port|Online|32Gbps|100008F1EAC0425A|N-Port
+16|2010D81FCC524BB4|F-Port|Online|32Gbps|100008F1EAC0425B|N-Port
+17|2011D81FCC524BB4|F-Port|Online|32Gbps|1000B47AF169F500|N-Port
+18|2012D81FCC524BB4|F-Port|Online|32Gbps|20420002AC07EFF8|N-Port
+19|2013D81FCC524BB4|F-Port|Online|32Gbps|1000B47AF169F501|N-Port
+21|2015D81FCC524BB4|F-Port|Online|32Gbps|20410002AC07EFF8|N-Port
+22|2016D81FCC524BB4|F-Port|Online|32Gbps|21410002AC07EFF8|N-Port
+23|2017D81FCC524BB4|F-Port|Online|32Gbps|21420002AC07EFF8|N-Port
+
+zoning info:
+zone 1:
+100008F1EAC0425A
+20410002AC07EFF8
+21410002AC07EFF8
+zone 2:
+100008F1EAC0425B
+20420002AC07EFF8
+21420002AC07EFF8
+
+Node information variables:
+node_count = 2
+node_version = 10.6.0.12
+
+
+host_info = SN1610Q FW:v9.12.01 DVR:v10.02.10.00-k1-debug
+
+Switch info:
+switch_name = 1000D81FCC524BB3
+switch_logical_name = switch_1
+switch_vendor = Brocade Communications, Inc.
+switch_model = 162.6
+switch_release = v9.1.1c
+
+
+
