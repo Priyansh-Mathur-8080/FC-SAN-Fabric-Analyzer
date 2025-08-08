@@ -1,9 +1,11 @@
+showsys output:
+0x7EFF8|S4156|HPE Alletra Storage|MP|4UW0004156|2|0|43917312|789091|37556637
 
 showport output:
-0:4:1 | target | ready | 2FF70002AC07EFA3 | 20410002AC07EFF8 | host | FC | -
-0:4:2 | target | ready | 2FF70002AC07EFA3 | 20420002AC07EFF8 | host | FC | -
-1:4:1 | target | ready | 2FF70002AC07EFA3 | 21410002AC07EFF8 | host | FC | -
-1:4:2 | target | ready | 2FF70002AC07EFA3 | 21420002AC07EFF8 | host | FC | -
+0:4:1 | target | ready | 2FF70002AC07EFF8 | 20410002AC07EFF8 | host | FC | -
+0:4:2 | target | ready | 2FF70002AC07EFF8 | 20420002AC07EFF8 | host | FC | -
+1:4:1 | target | ready | 2FF70002AC07EFF8 | 21410002AC07EFF8 | host | FC | -
+1:4:2 | target | ready | 2FF70002AC07EFF8 | 21420002AC07EFF8 | host | FC | -
 
 
 showhost output:
@@ -43,6 +45,3 @@ switch_logical_name = switch_1
 switch_vendor = Brocade Communications, Inc.
 switch_model = 162.6
 switch_release = v9.1.1c
-
-
-

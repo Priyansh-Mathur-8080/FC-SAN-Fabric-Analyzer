@@ -83,3 +83,33 @@ class InitiatorNode:
     def __repr__(self):
         """Detailed string representation of the initiator node."""
         return f"InitiatorNode(name='{self.name}', hba='{self.hba}', fw_version='{self.fw_version}')"
+    
+class TargetArray:
+    """
+    Represents a target array (storage system) in a Fibre Channel SAN network.
+    """
+    
+    def __init__(self, wwnn=None, name=None, node_count=0, serial_number=None):
+        """
+        Initialize a TargetArray instance.
+        
+        Args:
+            wwnn (str): World Wide Node Name of the array
+            name (str): Name/model of the storage array
+            node_count (int): Number of nodes in the array
+            serial_number (str): Serial number of the array
+        """
+        self.wwnn = wwnn
+        self.name = name
+        self.node_count = node_count
+        self.serial_number = serial_number
+        self.software_version = None  # Placeholder for software version, if needed
+    
+    def __str__(self):
+        """String representation of the target array."""
+        return f"TargetArray(name={self.name}, wwnn={self.wwnn}, nodes={self.node_count})"
+    
+    def __repr__(self):
+        """Detailed string representation of the target array."""
+        return (f"TargetArray(wwnn='{self.wwnn}', name='{self.name}', "
+                f"node_count={self.node_count}, serial_number='{self.serial_number}')")

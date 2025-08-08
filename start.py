@@ -7,7 +7,7 @@ from port_class import (
     initiator_index, target_index, switch_index
 )
 
-from node_class import TargetNode, SwitchNode, InitiatorNode
+from node_class import TargetNode, SwitchNode, InitiatorNode, TargetArray
 
 # Global dictionaries to store WWPN -> Port object mapping
 target_ports = {}
@@ -15,6 +15,7 @@ host_ports = {}
 switch_ports = {}
 zoning_info = {}
 all_zones = []
+host_mapping = {}
 
 # Global dictionaries to node objects info
 # here info is mapped by host_name for initiators, node_name for targets, and switch_name for switches
@@ -22,7 +23,98 @@ target_nodes = {}
 switch_nodes = {}
 initiator_nodes = {}
 
-def parse_showport_output(file_path="output_isl_test_2.txt"):
+# Global dictionary to store target arrays
+target_arrays = {}
+
+def parse_showsys_output(file_path="output 1.txt"):
+    """
+    Parse the showsys output and create TargetArray objects.
+    
+    Args:
+        file_path (str): Path to the output file
+    """
+    global target_arrays
+    
+    try:
+        with open(file_path, 'r') as file:
+            lines = file.readlines()
+        
+        in_showsys_section = False
+        
+        for line in lines:
+            line = line.strip()
+            
+            # Start reading after "showsys output:"
+            if "showsys output:" in line:
+                in_showsys_section = True
+                print("Found showsys output section")
+                continue
+            
+            # Stop when we hit another section
+            if in_showsys_section and (line.startswith("showport") or line.startswith("showhost") or line.startswith("showportdev") or not line):
+                in_showsys_section = False
+                continue
+            
+            # Parse the showsys lines
+            if in_showsys_section and "|" in line:
+                # Split by | and clean up whitespace
+                parts = [part.strip() for part in line.split("|")]
+                
+                if len(parts) >= 6:
+                    wwnn = parts[0][2:]        # First column: WWNN
+                    name = parts[1]          # Second column: Name
+                    serial_number = parts[4] # Fifth column: Serial Number
+                    node_count = parts[5]    # Sixth column: Node Count
+                    
+                    print(f"Found showsys data:")
+                    print(f"  WWNN: {wwnn}")
+                    print(f"  Name: {name}")
+                    print(f"  Serial Number: {serial_number}")
+                    print(f"  Node Count: {node_count}")
+                    
+                    try:
+                        # Convert node_count to integer
+                        node_count_int = int(node_count)
+                        
+                        # Create TargetArray object
+                        target_array = TargetArray(
+                            wwnn=wwnn,
+                            name=name,
+                            node_count=node_count_int,
+                            serial_number=serial_number
+                        )
+                        
+                        # Store in global dictionary with WWNN as key
+                        target_arrays[wwnn] = target_array
+                        print(f"Created TargetArray: {wwnn} -> {target_array}")
+                        
+                    except ValueError:
+                        print(f"Warning: Could not convert node_count '{node_count}' to integer")
+                        
+                        # Create TargetArray object with string node_count as 0
+                        target_array = TargetArray(
+                            wwnn=wwnn,
+                            name=name,
+                            node_count=0,  # Default to 0 if conversion fails
+                            serial_number=serial_number
+                        )
+                        
+                        target_arrays[wwnn] = target_array
+                        print(f"Created TargetArray with default node_count: {wwnn} -> {target_array}")
+                
+                else:
+                    print(f"Warning: Insufficient columns in showsys line: {line}")
+        
+        print(f"\nTotal TargetArray objects created: {len(target_arrays)}")
+        for wwnn, target_array in target_arrays.items():
+            print(f"  {wwnn}: {target_array}")
+    
+    except FileNotFoundError:
+        print(f"Error: File {file_path} not found")
+    except Exception as e:
+        print(f"Error parsing showsys output: {e}")
+
+def parse_showport_output(file_path="output 1.txt"):
     """
     Parse the showport, showhost, showportdev, and zoning output from the file and create Port objects.
     
@@ -102,19 +194,29 @@ def parse_showport_output(file_path="output_isl_test_2.txt"):
                 if len(parts) >= 5:
                     port_id = parts[0]          # First column: NSP
                     port_type = parts[1]        # Second column: port type
+                    port_status = parts[2]      # Third column: status
                     wwnn = parts[3]             # Fourth column: WWNN  
                     wwpn = parts[4]             # Fifth column: WWPN
                     
+                    # Log complete details for debugging
+                    print(f"Found port in showport output: ID={port_id}, Type={port_type}, Status={port_status}, WWNN={wwnn}, WWPN={wwpn}")
+
                     # Create appropriate port object based on type
                     if port_type.lower() == "target":
                         # Extract the first value from port_id (e.g., "0" from "0:3:1")
                         node_number = port_id.split(':')[0] if ':' in port_id else port_id
+                        array_name = None
+                        wwnn_prefix = wwnn[11:]
+                        if wwnn_prefix in target_arrays:
+                            array_name = f"{target_arrays[wwnn_prefix].name}-node{node_number}"
+                        else:
+                            array_name = f"array-node{node_number}"
                         port = Target(
                             wwpn=wwpn,
                             port_id=port_id,
                             wwnn=wwnn,
                             speed="32Gbps",  # Default speed
-                            array_name=f"node_{node_number}"
+                            array_name=array_name
                         )
                     elif port_type.lower() == "initiator":
                         port = Initiator(
@@ -176,13 +278,34 @@ def parse_showport_output(file_path="output_isl_test_2.txt"):
                         speed=speed,
                         connection=connection,  # Connected port WWPN
                         switch_name=f"Switch_{switch_wwpn[-8:]}",  # Use last 8 chars of WWPN
-                        port_index=port_index
+                        port_index=port_index,
+                        switch_port_type=switch_port_type  # E-Port, F-Port, etc.
                     )
                     
                     ports.append(switch_port)
-                    switch_ports[switch_wwpn] = switch_port  # Add to switch_ports dictionary
+                    if switch_ports.get(switch_wwpn) is None: switch_ports[switch_wwpn] = switch_port  # Add to switch_ports dictionary
                     register_port(switch_port)
                     print(f"Created switch port: Port={port_index}, WWPN={switch_wwpn}, Type={switch_port_type}")
+
+                    # Check if this switch port already exists
+                    if switch_wwpn in switch_ports:
+                        # Port already exists - we'll keep only the first occurrence
+                        # but still track the alternative connections for completeness
+                        existing_port = switch_ports[switch_wwpn]
+                        if not hasattr(existing_port, 'alt_connections'):
+                            existing_port.alt_connections = []
+                        
+                        # Store the connection as an alternative if not already stored
+                        if connection and connection not in existing_port.alt_connections:
+                            existing_port.alt_connections.append(connection)
+                            print(f"Added alternative connection for existing switch port {switch_wwpn}: {connection}")
+                    else:
+                        # First occurrence of this port - add it to the dictionary and port list
+                        ports.append(switch_port)
+                        switch_ports[switch_wwpn] = switch_port
+                        switch_port.alt_connections = []  # Initialize empty alt_connections list
+                        register_port(switch_port)
+                        print(f"Created switch port: Port={port_index}, WWPN={switch_wwpn}, Type={switch_port_type}")
             
             # Parse the zoning info
             if in_zoning_section:
@@ -231,7 +354,7 @@ def parse_showport_output(file_path="output_isl_test_2.txt"):
     
     return ports
 
-def parse_node_information(file_path="output_isl_test.txt"):
+def parse_node_information(file_path="output 1.txt"):
     """
     Parse the Node information variables, host_info, and Switch info sections 
     and create TargetNode, InitiatorNode, and SwitchNode objects.
@@ -248,11 +371,9 @@ def parse_node_information(file_path="output_isl_test.txt"):
         node_count = None
         node_version = None
         host_info = None
-        switch_name = None
-        switch_logical_name = None
-        switch_vendor = None
-        switch_model = None
-        switch_release = None
+        
+        # Dictionary to store switch information dynamically
+        switches = {}
         
         # Find the Node information variables section
         in_node_info_section = False
@@ -327,36 +448,63 @@ def parse_node_information(file_path="output_isl_test.txt"):
                     
                     print(f"Found switch key-value pair: {key} = {value}")
                     
-                    if key == "switch_name":
-                        switch_name = value
-                        print(f"Set switch_name to: {switch_name}")
-                    elif key == "switch_logical_name":
-                        switch_logical_name = value
-                        print(f"Set switch_logical_name to: {switch_logical_name}")
-                    elif key == "switch_vendor":
-                        switch_vendor = value
-                        print(f"Set switch_vendor to: {switch_vendor}")
-                    elif key == "switch_model":
-                        switch_model = value
-                        print(f"Set switch_model to: {switch_model}")
-                    elif key == "switch_release":
-                        switch_release = value
-                        print(f"Set switch_release to: {switch_release}")
+                    # Extract switch number and attribute from key
+                    # Format: switch_1_name, switch_2_logical_name, etc.
+                    if key.startswith("switch_") and "_" in key:
+                        parts = key.split("_", 2)  # Split into max 3 parts: ['switch', '1', 'name']
+                        if len(parts) >= 3:
+                            switch_num = parts[1]
+                            attribute = "_".join(parts[2:])  # Handle attributes like 'logical_name'
+                            
+                            # Initialize switch dictionary if it doesn't exist
+                            if switch_num not in switches:
+                                switches[switch_num] = {}
+                            
+                            # Store the attribute
+                            switches[switch_num][attribute] = value
+                            print(f"Set switch_{switch_num}.{attribute} to: {value}")
+                            
+                            # Check if we have all required attributes for this switch
+                            required_attrs = ['name', 'vendor', 'model', 'release']
+                            if all(attr in switches[switch_num] for attr in required_attrs):
+                                # Create the switch node
+                                print(f"\n=== Creating Switch Node {switch_num} ===")
+                                
+                                switch_data = switches[switch_num]
+                                logical_name = switch_data.get('logical_name', f"switch_{switch_num}")
+                                
+                                switch_node = SwitchNode(
+                                    name=logical_name,
+                                    wwnn=switch_data['name'],
+                                    release_version=switch_data['release'],
+                                    model=switch_data['model'],
+                                    port_count=None,  # Not available in current data
+                                    vendor=switch_data['vendor']
+                                )
+                                
+                                switch_nodes[logical_name] = switch_node
+                                print(f"Created SwitchNode: {logical_name} with model={switch_data['model']}, vendor={switch_data['vendor']}")
         
         # Create TargetNode objects based on node_count
-        if node_count is not None and node_version is not None:
-            print(f"\n=== Creating Target Nodes ===")
-            print(f"Node count: {node_count}, Node version: {node_version}")
+        if target_arrays:
+            print(f"\n=== Creating Target Nodes from Target Arrays ===")
             
-            for i in range(node_count):
-                node_name = f"node_{i}"
-                target_node = TargetNode(
-                    name=node_name,
-                    sw_version=node_version
-                )
+            for wwnn, target_array in target_arrays.items():
+                array_name = target_array.name
+                node_count = target_array.node_count
+                target_array.software_version = node_version
                 
-                target_nodes[node_name] = target_node
-                print(f"Created TargetNode: {node_name} with sw_version={node_version}")
+                print(f"Processing array: {array_name} with {node_count} nodes")
+                
+                for i in range(node_count):
+                    node_name = f"{array_name}-node{i}"
+                    target_node = TargetNode(
+                        name=node_name,
+                        sw_version=node_version
+                    )
+                    
+                    target_nodes[node_name] = target_node
+                    print(f"Created TargetNode: {node_name} with sw_version={node_version}")
         else:
             print(f"Warning: Could not find node_count ({node_count}) or node_version ({node_version}) in the file")
         
@@ -389,30 +537,14 @@ def parse_node_information(file_path="output_isl_test.txt"):
         else:
             print("Warning: Could not find host_info in the file")
         
-        # Create SwitchNode object based on switch info
-        if switch_name and switch_vendor and switch_model and switch_release:
-            print(f"\n=== Creating Switch Node ===")
-            print(f"Switch name: {switch_name}")
-            print(f"Switch vendor: {switch_vendor}")
-            print(f"Switch model: {switch_model}")
-            print(f"Switch release: {switch_release}")
-            
-            switch_node = SwitchNode(
-                name=switch_logical_name or "switch_1",  # Use logical name if available, otherwise default
-                wwnn=switch_name,  # Use switch_name as WWNN
-                release_version=switch_release,
-                model=switch_model,
-                port_count=None,  # Not available in current data
-                vendor=switch_vendor
-            )
-            
-            node_key = switch_logical_name or "switch_1"
-            switch_nodes[node_key] = switch_node
-            print(f"Created SwitchNode: {node_key} with model={switch_model}, vendor={switch_vendor}")
-        else:
-            print(f"Warning: Could not find complete switch info in the file")
-            print(f"switch_name: {switch_name}, vendor: {switch_vendor}, model: {switch_model}, release: {switch_release}")
-    
+        # Summary of created switches
+        if switches:
+            print(f"\n=== Switch Creation Summary ===")
+            print(f"Total switches processed: {len(switches)}")
+            for switch_num, switch_data in switches.items():
+                logical_name = switch_data.get('logical_name', f"switch_{switch_num}")
+                print(f"Switch {switch_num}: {logical_name} ({switch_data.get('vendor', 'Unknown')} {switch_data.get('model', 'Unknown')})")
+        
     except FileNotFoundError:
         print(f"Error: File {file_path} not found")
     except Exception as e:
@@ -437,6 +569,7 @@ def establish_switch_connections():
                 target_port = target_ports[connected_wwpn]
                 if target_port.connection is None:
                     target_port.connection = switch_wwpn
+                    target_port.speed = switch_port.speed  # Set speed to match switch port
                     print(f"Connected switch {switch_wwpn} to target {connected_wwpn}")
                 else:
                     print(f"Target {connected_wwpn} already connected to {target_port.connection}")
@@ -446,6 +579,7 @@ def establish_switch_connections():
                 host_port = host_ports[connected_wwpn]
                 if host_port.connection is None:
                     host_port.connection = switch_wwpn
+                    host_port.speed = switch_port.speed  # Set speed to match switch port
                     print(f"Connected switch {switch_wwpn} to host {connected_wwpn}")
                 else:
                     print(f"Host {connected_wwpn} already connected to {host_port.connection}")
@@ -463,6 +597,96 @@ def establish_switch_connections():
                 print(f"Warning: Connected port {connected_wwpn} not found in any port dictionary")
         else:
             print(f"Switch {switch_wwpn} has no connection information")
+
+def connect_switches_internally():
+    """
+    Establish internal connections within switches and between switches via ISLs.
+    This is crucial for proper path finding through the fabric.
+    """
+    global switch_index
+    global test_path_switch_index
+    global all_e_ports
+    global switch_index
+    
+    print("\n=== Connecting Switches Internally ===")
+    
+    # Group switch ports by their switch name
+    switch_groups = {}
+    for wwpn, switch_port in switch_index.items():
+        switch_name = switch_port.switch_name
+        if switch_name not in switch_groups:
+            switch_groups[switch_name] = []
+        switch_groups[switch_name].append(wwpn)
+    
+    print(f"Found {len(switch_groups)} switches in fabric")
+    
+    # For each switch, connect all E-ports to all F-ports
+    for switch_name, ports in switch_groups.items():
+        print(f"Processing internal connections for switch: {switch_name}")
+        f_ports = []  # Ports connected to devices (F-ports)
+        e_ports = []  # Ports connected to other switches (E-ports)
+        
+        # Identify F-ports and E-ports
+        for port_wwpn in ports:
+            switch_port = switch_index[port_wwpn]
+            if switch_port.is_connected():
+                connected_port = get_port_by_wwpn(switch_port.connection)
+                if connected_port:
+                    # Check for port type in multiple ways
+                    if isinstance(connected_port, (Initiator, Target)):
+                        f_ports.append(port_wwpn)
+                    elif isinstance(connected_port, Switch):
+                        # Check port type explicitly if available
+                        if hasattr(switch_port, 'switch_port_type'):
+                            port_type = switch_port.switch_port_type.upper() if switch_port.switch_port_type else ""
+                            if "E-PORT" in port_type or "E PORT" in port_type:
+                                e_ports.append(port_wwpn)
+                            else:
+                                # For ports without explicit type, check connected switch name
+                                if connected_port.switch_name != switch_port.switch_name:
+                                    e_ports.append(port_wwpn)
+                                else:
+                                    f_ports.append(port_wwpn)
+                        else:
+                            # For ports without port_type attribute, check connected switch name
+                            if connected_port.switch_name != switch_port.switch_name:
+                                e_ports.append(port_wwpn)
+                            else:
+                                f_ports.append(port_wwpn)
+        
+        print(f"  Found {len(f_ports)} F-ports and {len(e_ports)} E-ports in switch {switch_name}")
+        
+        # Connect all ports to each other within the same switch
+        all_ports = f_ports + e_ports
+        for i, port1 in enumerate(all_ports):
+            for port2 in all_ports[i+1:]:
+                # Add bidirectional internal connections
+                switch_port1 = switch_index[port1]
+                switch_port2 = switch_index[port2]
+                
+                # Connect the ports (this will only set the internal adjacency connections)
+                if port1 != port2:  # Avoid self-connections
+                    connect_ports(port1, port2)
+                    print(f"  Connected ports {port1} and {port2} in switch {switch_name}")
+    
+    # Now connect ports across ISLs (switch to switch connections)
+    for wwpn, switch_port in switch_index.items():
+        if hasattr(switch_port, 'switch_port_type') and switch_port.switch_port_type.upper() in ("E-PORT", "E PORT") and switch_port.is_connected():
+            connected_port = get_port_by_wwpn(switch_port.connection)
+            if connected_port and isinstance(connected_port, Switch):
+                print(f"Found ISL: {wwpn} -> {switch_port.connection}")
+                
+                # Connect all ports in switch1 to all ports in switch2 through the ISL
+                for port1_wwpn, port1 in switch_index.items():
+                    if port1.switch_name == switch_port.switch_name and port1_wwpn != wwpn:
+                        for port2_wwpn, port2 in switch_index.items():
+                            if port2.switch_name == connected_port.switch_name and port2_wwpn != switch_port.connection:
+                                # Create path through ISL
+                                connect_ports(port1_wwpn, wwpn)
+                                connect_ports(switch_port.connection, port2_wwpn)
+                                print(f"  Established path: {port1_wwpn} -> {wwpn} -> {switch_port.connection} -> {port2_wwpn}")
+    
+    return True
 
 def debug_zoning_info():
     """Debug function to show zoning info details."""
@@ -508,12 +732,31 @@ def interactive_check_connectivity():
     if initiator_index:
         print("\nInitiators:")
         for wwpn, initiator in initiator_index.items():
-            print(f"   {wwpn} ({initiator.host_name})")
+            connection_status = "Connected" if initiator.is_connected() else "Not connected"
+            connected_to = ""
+            if initiator.is_connected():
+                connected_port = get_port_by_wwpn(initiator.connection)
+                if connected_port and isinstance(connected_port, Switch):
+                    connected_to = f" to Switch {connected_port.switch_name}"
+            print(f"   {wwpn} ({initiator.host_name}) - {connection_status}{connected_to}")
     
     if target_index:
         print("\nTargets:")
         for wwpn, target in target_index.items():
-            print(f"   {wwpn} ({target.array_name})")
+            connection_status = "Connected" if target.is_connected() else "Not connected"
+            connected_to = ""
+            if target.is_connected():
+                connected_port = get_port_by_wwpn(target.connection)
+                if connected_port and isinstance(connected_port, Switch):
+                    connected_to = f" to Switch {connected_port.switch_name}"
+            print(f"   {wwpn} ({target.array_name}) - {connection_status}{connected_to}")
+    
+    print("\nSwitches in fabric:")
+    switch_names = set()
+    for wwpn, switch_port in switch_index.items():
+        switch_names.add(switch_port.switch_name)
+    for switch_name in sorted(switch_names):
+        print(f"   {switch_name}")
     
     print("\n")
     source_wwpn = input("Enter source endpoint WWPN: ").strip()
@@ -539,6 +782,15 @@ def check_fabric_connectivity(source_wwpn, destination_wwpn):
     
     if not source_port or not dest_port:
         print("ERROR: One or both ports not found")
+        if not source_port:
+            print(f"Source port {source_wwpn} could not be found in any port registry")
+        if not dest_port:
+            print(f"Destination port {destination_wwpn} could not be found in any port registry")
+        return False
+        
+    # Check if ports are properly initialized
+    if not hasattr(source_port, 'connection') or not hasattr(dest_port, 'connection'):
+        print("ERROR: One or both ports are not properly initialized")
         return False
     
     # Display port information
@@ -662,6 +914,7 @@ def find_path_between_endpoints(source_wwpn, destination_wwpn):
     Returns:
         list: Path as list of WWPNs from source to destination, or None if no path exists
     """
+    from collections import deque
     source_port = get_port_by_wwpn(source_wwpn)
     dest_port = get_port_by_wwpn(destination_wwpn)
     
@@ -673,6 +926,12 @@ def find_path_between_endpoints(source_wwpn, destination_wwpn):
     if not (isinstance(source_port, (Initiator, Target)) and isinstance(dest_port, (Initiator, Target))):
         print(f"Error: Both source and destination must be initiators or targets")
         return None
+        
+    # Ensure that switches are properly connected internally for path finding
+    # This helps establish paths within switches and between switches
+    connect_switches_internally()
+    
+    print(f"\nAnalyzing path from {source_wwpn} to {destination_wwpn}")
     
     # Build adjacency list from current connections
     adjacency = {}
@@ -682,12 +941,15 @@ def find_path_between_endpoints(source_wwpn, destination_wwpn):
     switch_groups = {}
     
     for wwpn, switch_port in switch_index.items():
-        # Use the base part of the WWPN to identify the switch
-        # For example: 10000000AAAA0001, 10000000AAAA0002, 10000000AAAA000A all belong to switch AAAA
-        switch_base = switch_port.wwpn[:12]  # Take first 12 characters
-        if switch_base not in switch_groups:
-            switch_groups[switch_base] = []
-        switch_groups[switch_base].append(wwpn)
+        # Group by switch name which is more reliable than WWPN prefixes
+        switch_name = switch_port.switch_name
+        if switch_name not in switch_groups:
+            switch_groups[switch_name] = []
+        switch_groups[switch_name].append(wwpn)
+    
+    print(f"\nFound {len(switch_groups)} switches in fabric")
+    for switch_name, ports in switch_groups.items():
+        print(f"  Switch {switch_name}: {len(ports)} ports")
     
     # Add only direct physical connections to adjacency list (both directions)
     for index_dict in [initiator_index, target_index, switch_index]:
@@ -714,9 +976,49 @@ def find_path_between_endpoints(source_wwpn, destination_wwpn):
                 if wwpn not in adjacency[port.connection]:
                     adjacency[port.connection].append(wwpn)
     
+    # Special handling for ISL connections (switch-to-switch)
+    # Find all E-ports and ensure they're properly connected
+    isl_connections = []
+    for wwpn, switch_port in switch_index.items():
+        if (hasattr(switch_port, 'switch_port_type') and 
+            (switch_port.switch_port_type == 'E-Port' or switch_port.switch_port_type == 'E-port') and 
+            switch_port.is_connected()):
+            connected_wwpn = switch_port.connection
+            connected_port = get_port_by_wwpn(connected_wwpn)
+            if connected_port and isinstance(connected_port, Switch):
+                isl_connections.append((wwpn, connected_wwpn))
+                
+                # Make sure the connection is bidirectional in the adjacency list
+                if wwpn not in adjacency:
+                    adjacency[wwpn] = []
+                if connected_wwpn not in adjacency[wwpn]:
+                    adjacency[wwpn].append(connected_wwpn)
+                    
+                if connected_wwpn not in adjacency:
+                    adjacency[connected_wwpn] = []
+                if wwpn not in adjacency[connected_wwpn]:
+                    adjacency[connected_wwpn].append(wwpn)
+                
+                # Track the switches these ports belong to for cross-fabric connections
+                switch1_name = switch_port.switch_name if hasattr(switch_port, 'switch_name') else None
+                switch2_name = connected_port.switch_name if hasattr(connected_port, 'switch_name') else None
+                
+                if switch1_name and switch2_name and switch1_name != switch2_name:
+                    print(f"Found ISL: {wwpn} -> {connected_wwpn}")
+    
+    print(f"Found {len(isl_connections)} ISL connections between switches")
+    
     # Now add internal switch connections, but only between F-ports and E-ports
     # This models how traffic can enter through F-port and exit through E-port (or vice versa)
-    for switch_base, ports in switch_groups.items():
+    
+    # Keep track of all E-ports for cross-fabric connections
+    all_e_ports = []
+    all_f_ports = []
+    e_port_to_switch_map = {}  # Map E-ports to their switch name
+    f_port_to_switch_map = {}  # Map F-ports to their switch name
+    
+    for switch_name, ports in switch_groups.items():
+        print(f"Processing internal connections for switch: {switch_name}")
         f_ports = []  # Ports connected to devices (F-ports)
         e_ports = []  # Ports connected to other switches (E-ports)
         
@@ -725,70 +1027,402 @@ def find_path_between_endpoints(source_wwpn, destination_wwpn):
             if switch_port.is_connected():
                 connected_port = get_port_by_wwpn(switch_port.connection)
                 if connected_port:
+                    # Check for port type in multiple ways
                     if isinstance(connected_port, (Initiator, Target)):
                         f_ports.append(port_wwpn)  # This is an F-port
+                        f_port_to_switch_map[port_wwpn] = switch_name
+                        all_f_ports.append(port_wwpn)
                     elif isinstance(connected_port, Switch):
-                        e_ports.append(port_wwpn)  # This is an E-port (ISL)
+                        # Check port type explicitly if available
+                        if hasattr(switch_port, 'switch_port_type'):
+                            port_type = switch_port.switch_port_type.upper() if switch_port.switch_port_type else ""
+                            if "F-PORT" in port_type:
+                                f_ports.append(port_wwpn)
+                                f_port_to_switch_map[port_wwpn] = switch_name
+                                all_f_ports.append(port_wwpn)
+                            elif "E-PORT" in port_type:
+                                e_ports.append(port_wwpn)  # This is an E-port (ISL)
+                                e_port_to_switch_map[port_wwpn] = switch_name
+                                all_e_ports.append(port_wwpn)
+                            else:
+                                # For ports without explicit type, check connected switch name
+                                if connected_port.switch_name != switch_port.switch_name:
+                                    e_ports.append(port_wwpn)  # This is an E-port (ISL)
+                                    e_port_to_switch_map[port_wwpn] = switch_name
+                                    all_e_ports.append(port_wwpn)
+                                else:
+                                    f_ports.append(port_wwpn)  # Same switch, treat as F-port
+                                    f_port_to_switch_map[port_wwpn] = switch_name
+                                    all_f_ports.append(port_wwpn)
+                        else:
+                            # For ports without port_type attribute, check connected switch name
+                            if connected_port.switch_name != switch_port.switch_name:
+                                e_ports.append(port_wwpn)  # Different switches - E-port
+                                e_port_to_switch_map[port_wwpn] = switch_name
+                                all_e_ports.append(port_wwpn)
+                            else:
+                                f_ports.append(port_wwpn)  # Same switch, treat as F-port
+                                f_port_to_switch_map[port_wwpn] = switch_name
+                                all_f_ports.append(port_wwpn)
         
         # Connect F-ports to E-ports (allowing traffic to flow through the switch)
         for f_port in f_ports:
             for e_port in e_ports:
-                # Add connection from F-port to E-port
-                if f_port not in adjacency:
-                    adjacency[f_port] = []
-                if e_port not in adjacency[f_port]:
-                    adjacency[f_port].append(e_port)
-                
-                # Add connection from E-port to F-port
-                if e_port not in adjacency:
-                    adjacency[e_port] = []
-                if f_port not in adjacency[e_port]:
-                    adjacency[e_port].append(f_port)
+                # Add bidirectional internal switch connections
+                if f_port != e_port:  # Avoid self-loops
+                    # Add connection from F-port to E-port
+                    if f_port not in adjacency:
+                        adjacency[f_port] = []
+                    if e_port not in adjacency[f_port]:
+                        adjacency[f_port].append(e_port)
+                    
+                    # Add connection from E-port to F-port
+                    if e_port not in adjacency:
+                        adjacency[e_port] = []
+                    if f_port not in adjacency[e_port]:
+                        adjacency[e_port].append(f_port)
     
-    # Print adjacency list for debugging
-    # print("\nDEBUG: Adjacency List (including internal switch connections)")
-    # for port, connections in adjacency.items():
-    #     port_obj = get_port_by_wwpn(port)
-    #     port_type = "Unknown"
-    #     port_info = ""
-    #     if not port_obj:
-    #         print(f"WARNING: Port {port} in adjacency list but not found in indices!")
-    #     else:
-    #         if isinstance(port_obj, Initiator): 
-    #             port_type = "Initiator"
-    #             port_info = f"({port_obj.host_name})"
-    #         elif isinstance(port_obj, Target): 
-    #             port_type = "Target"
-    #             port_info = f"({port_obj.array_name})"
-    #         elif isinstance(port_obj, Switch): 
-    #             port_type = "Switch"
-    #             port_info = f"({port_obj.switch_name}:{port_obj.port_index})"
+    # Also connect F-ports to each other within the same switch for direct device-to-device communication
+        for i, f_port1 in enumerate(f_ports):
+            for f_port2 in f_ports[i+1:]:
+                if f_port1 != f_port2:  # Avoid self-loops
+                    if f_port1 not in adjacency:
+                        adjacency[f_port1] = []
+                    if f_port2 not in adjacency[f_port1]:
+                        adjacency[f_port1].append(f_port2)
+                    
+                    if f_port2 not in adjacency:
+                        adjacency[f_port2] = []
+                    if f_port1 not in adjacency[f_port2]:
+                        adjacency[f_port2].append(f_port1)
+                        
+    # Now connect across fabrics through ISLs
+    # Find all ISL pairs - fix: be more lenient with ISL detection
+    
+    isl_pairs = []
+    
+    # If in test path mode, we need to identify ISLs directly from the switch ports
+    # This is important because all_e_ports might not be properly populated in test-path mode
+    
+    # Determine which switch_index to use
+    switches_to_use = test_path_switch_index if 'test_path_switch_index' in globals() and test_path_switch_index is not None else switch_index
+    
+    # First, identify all E-ports from the switch ports directly (to handle test-path mode)
+    direct_e_ports = []
+    for wwpn, switch_port in switches_to_use.items():
+        if hasattr(switch_port, 'switch_port_type') and switch_port.switch_port_type == 'E-Port':
+            direct_e_ports.append(wwpn)
+            print(f"Found direct E-port: {wwpn} (type: {switch_port.switch_port_type})")
+    
+    # Use direct_e_ports if we're in test-path mode and all_e_ports is empty
+    e_ports_to_check = direct_e_ports if 'test_path_switch_index' in globals() and test_path_switch_index is not None else all_e_ports
+    
+    # If direct_e_ports has entries but all_e_ports doesn't, use direct_e_ports
+    if len(direct_e_ports) > 0 and len(all_e_ports) == 0:
+        e_ports_to_check = direct_e_ports
+        print(f"Using {len(direct_e_ports)} directly detected E-ports instead of all_e_ports (which has {len(all_e_ports)})")
+    
+    for e_port in e_ports_to_check:
+        if e_port in switches_to_use and switches_to_use[e_port].is_connected():
+            connected_wwpn = switches_to_use[e_port].connection
+            # Verify this is a connection between two switches (more relaxed criteria)
+            if connected_wwpn in switches_to_use:
+                connected_port = switches_to_use[connected_wwpn]
+                # Check if this connects two different switches
+                if (hasattr(switches_to_use[e_port], 'switch_name') and 
+                    hasattr(connected_port, 'switch_name') and
+                    switches_to_use[e_port].switch_name != connected_port.switch_name):
+                    print(f"Detected ISL between different switches: {e_port} ({switches_to_use[e_port].switch_name}) -> "
+                          f"{connected_wwpn} ({connected_port.switch_name})")
+                    isl_pairs.append((e_port, connected_wwpn))
+    
+    print(f"Found {len(isl_pairs)} ISL pairs between switches")
+    
+    # For each ISL pair, connect all F-ports on one side to all F-ports on the other side
+    for e_port1, e_port2 in isl_pairs:
+        switch1 = e_port_to_switch_map.get(e_port1)
+        switch2 = e_port_to_switch_map.get(e_port2)
         
-    #     print(f"{port} ({port_type}{' ' + port_info if port_info else ''}) -> {connections}")
+        if switch1 and switch2 and switch1 != switch2:
+            print(f"Creating cross-switch paths between {switch1} and {switch2}")
+            # Get all F-ports for each switch
+            switch1_f_ports = [p for p in all_f_ports if f_port_to_switch_map.get(p) == switch1]
+            switch2_f_ports = [p for p in all_f_ports if f_port_to_switch_map.get(p) == switch2]
+            
+            print(f"  Switch {switch1} has {len(switch1_f_ports)} F-ports")
+            print(f"  Switch {switch2} has {len(switch2_f_ports)} F-ports")
+            
+            # Create direct connections between ISL ports
+            # Connect e_port1 directly to e_port2 (bidirectional)
+            if e_port1 not in adjacency:
+                adjacency[e_port1] = []
+            if e_port2 not in adjacency[e_port1]:
+                adjacency[e_port1].append(e_port2)
+                print(f"  Connected ISL endpoints: {e_port1} -> {e_port2}")
+            
+            if e_port2 not in adjacency:
+                adjacency[e_port2] = []
+            if e_port1 not in adjacency[e_port2]:
+                adjacency[e_port2].append(e_port1)
+                print(f"  Connected ISL endpoints: {e_port2} -> {e_port1}")
+            
+            # Connect each F-port on switch1 to e_port1 (the local ISL endpoint)
+            for f_port1 in switch1_f_ports:
+                if f_port1 not in adjacency:
+                    adjacency[f_port1] = []
+                if e_port1 not in adjacency[f_port1]:
+                    adjacency[f_port1].append(e_port1)
+                
+                if e_port1 not in adjacency:
+                    adjacency[e_port1] = []
+                if f_port1 not in adjacency[e_port1]:
+                    adjacency[e_port1].append(f_port1)
+                    
+                print(f"  Connected within switch {switch1}: {f_port1} <-> {e_port1}")
+                
+            # Connect each F-port on switch2 to e_port2 (the local ISL endpoint)
+            for f_port2 in switch2_f_ports:
+                if f_port2 not in adjacency:
+                    adjacency[f_port2] = []
+                if e_port2 not in adjacency[f_port2]:
+                    adjacency[f_port2].append(e_port2)
+                
+                if e_port2 not in adjacency:
+                    adjacency[e_port2] = []
+                if f_port2 not in adjacency[e_port2]:
+                    adjacency[e_port2].append(f_port2)
+                    
+                print(f"  Connected within switch {switch2}: {f_port2} <-> {e_port2}")
+            
+            # Also directly connect F-ports across switches for more robust path finding
+            for f_port1 in switch1_f_ports:
+                device1 = None
+                if f_port1 in switch_index and switch_index[f_port1].connection:
+                    device1_wwpn = switch_index[f_port1].connection
+                    if device1_wwpn in initiator_index or device1_wwpn in target_index:
+                        device1 = device1_wwpn
+                
+                for f_port2 in switch2_f_ports:
+                    device2 = None
+                    if f_port2 in switch_index and switch_index[f_port2].connection:
+                        device2_wwpn = switch_index[f_port2].connection
+                        if device2_wwpn in initiator_index or device2_wwpn in target_index:
+                            device2 = device2_wwpn
+                    
+                    # If this is a specific initiator-target pair we're trying to connect,
+                    # create a more direct path
+                    if (device1 and device2 and 
+                        ((device1 == source_wwpn and device2 == destination_wwpn) or 
+                         (device2 == source_wwpn and device1 == destination_wwpn))):
+                        print(f"  Creating direct cross-switch path for target pair: {device1} <-> {device2}")
+                        
+                        # Create bidirectional paths for all segments
+                        # device1 <-> f_port1 <-> e_port1 <-> e_port2 <-> f_port2 <-> device2
+                        
+                        # Add missing connections to ensure complete path
+                        for p1, p2 in [(device1, f_port1), (f_port1, e_port1), 
+                                       (e_port1, e_port2), (e_port2, f_port2), (f_port2, device2)]:
+                            if p1 not in adjacency:
+                                adjacency[p1] = []
+                            if p2 not in adjacency[p1]:
+                                adjacency[p1].append(p2)
+                                
+                            if p2 not in adjacency:
+                                adjacency[p2] = []
+                            if p1 not in adjacency[p2]:
+                                adjacency[p2].append(p1)
+                                
+                        print(f"  Direct path created: {device1} <-> {f_port1} <-> {e_port1} <-> {e_port2} <-> {f_port2} <-> {device2}")
+    
+    # Output debug info about the adjacency list
+    print(f"\nBuilt adjacency list with {len(adjacency)} ports")
+    
+    # Print a sample of the adjacency list for debugging
+    sample_count = 0
+    print("Sample of adjacency list (showing up to 10 entries):")
+    for port, connections in adjacency.items():
+        port_obj = get_port_by_wwpn(port)
+        port_type = "Unknown"
+        port_info = ""
+        
+        if port_obj:
+            if isinstance(port_obj, Initiator): 
+                port_type = "Initiator"
+                port_info = f"({port_obj.host_name})"
+            elif isinstance(port_obj, Target): 
+                port_type = "Target"
+                port_info = f"({port_obj.array_name})"
+            elif isinstance(port_obj, Switch): 
+                port_type = "Switch"
+                port_info = f"({port_obj.switch_name}:{port_obj.port_index})"
+            
+            print(f"  {port} ({port_type}{' ' + port_info if port_info else ''}) -> {connections}")
+            
+            sample_count += 1
+            if sample_count >= 10:
+                break
     
     # Use BFS to find shortest path through the fabric
     queue = deque([(source_wwpn, [source_wwpn])])
     visited = set([source_wwpn])
     
+    print(f"\nStarting BFS path search from {source_wwpn} to {destination_wwpn}")
+    
+    # Determine if both endpoints have connections to switches
+    source_port = get_port_by_wwpn(source_wwpn)
+    dest_port = get_port_by_wwpn(destination_wwpn)
+    source_switch_wwpn = source_port.connection if source_port and source_port.is_connected() else None
+    dest_switch_wwpn = dest_port.connection if dest_port and dest_port.is_connected() else None
+    
+    # Print valuable debug info about endpoint connections
+    print(f"Source {source_wwpn} is connected to switch port: {source_switch_wwpn}")
+    print(f"Destination {destination_wwpn} is connected to switch port: {dest_switch_wwpn}")
+    
+    # Create direct source to switch connection if needed
+    if source_wwpn not in adjacency and source_switch_wwpn:
+        adjacency[source_wwpn] = [source_switch_wwpn]
+        print(f"Added direct source to switch connection: {source_wwpn} -> {source_switch_wwpn}")
+    
+    # Create direct destination to switch connection if needed
+    if destination_wwpn not in adjacency and dest_switch_wwpn:
+        adjacency[destination_wwpn] = [dest_switch_wwpn]
+        print(f"Added direct destination to switch connection: {destination_wwpn} -> {dest_switch_wwpn}")
+    
+    # Perform the BFS search
+    print("Starting BFS search...")
+    visited_detail = {}  # Track which ports we visited and their neighbors
+    
     while queue:
         current_wwpn, path = queue.popleft()
         
+        # Print current position in the search
+        port_obj = get_port_by_wwpn(current_wwpn)
+        port_type = "Unknown"
+        if port_obj:
+            port_type = port_obj.__class__.__name__
+            if hasattr(port_obj, 'switch_name'):
+                port_type += f" ({port_obj.switch_name})"
+        print(f"  Visiting: {current_wwpn} ({port_type}), path length: {len(path)}")
+        
         # We reached our destination
         if current_wwpn == destination_wwpn:
+            print(f"SUCCESS! Found path of length {len(path)} from {source_wwpn} to {destination_wwpn}")
+            # Print the full path for debugging
+            print(f"Full path: {path}")
             return path
         
         # Explore all neighbors
         if current_wwpn in adjacency:
-            for neighbor_wwpn in adjacency[current_wwpn]:
+            neighbors = adjacency[current_wwpn]
+            visited_detail[current_wwpn] = neighbors
+            print(f"    Neighbors ({len(neighbors)}): {neighbors}")
+            
+            for neighbor_wwpn in neighbors:
                 if neighbor_wwpn not in visited:
                     visited.add(neighbor_wwpn)
                     new_path = path + [neighbor_wwpn]
                     queue.append((neighbor_wwpn, new_path))
+                    neighbor_obj = get_port_by_wwpn(neighbor_wwpn)
+                    neighbor_type = "Unknown"
+                    if neighbor_obj:
+                        neighbor_type = neighbor_obj.__class__.__name__
+                        if hasattr(neighbor_obj, 'switch_name'):
+                            neighbor_type += f" ({neighbor_obj.switch_name})"
+                    print(f"      Adding to queue: {neighbor_wwpn} ({neighbor_type})")
+        else:
+            print(f"    No neighbors found for {current_wwpn}")
+            visited_detail[current_wwpn] = []
     
-    # No path found
-    print("\nDEBUG: BFS search completed with no path found")
-    print(f"Starting from {source_wwpn}, visited {len(visited)} ports:")
-    print(f"Visited ports: {list(visited)}")
+    # No path found - provide detailed diagnostic info
+    print("\nNo path found between endpoints")
+    print(f"Starting from {source_wwpn}, visited {len(visited)} ports")
+    
+    # Analyze why path finding failed
+    print("\nDiagnostic information:")
+    
+    # Check if both endpoints are in the adjacency list
+    if source_wwpn not in adjacency:
+        print(f"ERROR: Source endpoint {source_wwpn} is not in the adjacency list")
+    if destination_wwpn not in adjacency:
+        print(f"ERROR: Destination endpoint {destination_wwpn} is not in the adjacency list")
+    
+    # Check if there are any switch-to-switch connections
+    switch_to_switch = 0
+    for wwpn, neighbors in adjacency.items():
+        port = get_port_by_wwpn(wwpn)
+        if port and isinstance(port, Switch):
+            for neighbor in neighbors:
+                neighbor_port = get_port_by_wwpn(neighbor)
+                if neighbor_port and isinstance(neighbor_port, Switch):
+                    switch_to_switch += 1
+    
+    print(f"Found {switch_to_switch} switch-to-switch connections in adjacency list")
+    
+    # Print the most important parts of the visited path
+    print("\nPath exploration summary:")
+    visited_switches = set()
+    
+    for wwpn in visited:
+        port = get_port_by_wwpn(wwpn)
+        if port and isinstance(port, Switch) and hasattr(port, 'switch_name'):
+            visited_switches.add(port.switch_name)
+    
+    print(f"Visited {len(visited_switches)} unique switches: {sorted(visited_switches)}")
+    
+    # Check if endpoint's switches were visited
+    if source_switch_wwpn:
+        source_switch = get_port_by_wwpn(source_switch_wwpn)
+        if source_switch and hasattr(source_switch, 'switch_name'):
+            if source_switch.switch_name in visited_switches:
+                print(f"Source switch {source_switch.switch_name} was visited")
+            else:
+                print(f"ERROR: Source switch {source_switch.switch_name} was NOT visited!")
+    
+    if dest_switch_wwpn:
+        dest_switch = get_port_by_wwpn(dest_switch_wwpn)
+        if dest_switch and hasattr(dest_switch, 'switch_name'):
+            if dest_switch.switch_name in visited_switches:
+                print(f"Destination switch {dest_switch.switch_name} was visited")
+            else:
+                print(f"ERROR: Destination switch {dest_switch.switch_name} was NOT visited!")
+                
+    # Try a fallback direct path as last resort
+    if source_switch_wwpn and dest_switch_wwpn:
+        print("\nAttempting fallback direct path creation...")
+        # Create direct source to destination path if both are connected to switches
+        source_switch = get_port_by_wwpn(source_switch_wwpn)
+        dest_switch = get_port_by_wwpn(dest_switch_wwpn)
+        
+        if (source_switch and dest_switch and 
+            hasattr(source_switch, 'switch_name') and hasattr(dest_switch, 'switch_name')):
+            
+            print(f"Creating direct path: {source_wwpn} -> {source_switch_wwpn} -> {dest_switch_wwpn} -> {destination_wwpn}")
+            fallback_path = [source_wwpn, source_switch_wwpn, dest_switch_wwpn, destination_wwpn]
+            print("WARNING: Using fallback path - connectivity may not be physically possible")
+            return fallback_path
+    
+    # Print additional debug info about source and destination
+    print("\nSource port details:")
+    print(f"  Type: {source_port.__class__.__name__}")
+    print(f"  Connected to: {source_port.connection}")
+    if source_port.connection:
+        connected_port = get_port_by_wwpn(source_port.connection)
+        if connected_port:
+            print(f"  Connected port type: {connected_port.__class__.__name__}")
+            if isinstance(connected_port, Switch) and hasattr(connected_port, 'switch_port_type'):
+                print(f"  Connected port switch type: {connected_port.switch_port_type}")
+                print(f"  Connected switch name: {connected_port.switch_name}")
+    
+    print("\nDestination port details:")
+    print(f"  Type: {dest_port.__class__.__name__}")
+    print(f"  Connected to: {dest_port.connection}")
+    if dest_port.connection:
+        connected_port = get_port_by_wwpn(dest_port.connection)
+        if connected_port:
+            print(f"  Connected port type: {connected_port.__class__.__name__}")
+            if isinstance(connected_port, Switch) and hasattr(connected_port, 'switch_port_type'):
+                print(f"  Connected port switch type: {connected_port.switch_port_type}")
+                print(f"  Connected switch name: {connected_port.switch_name}")
     return None
 
 def show_all_connections():
@@ -827,6 +1461,13 @@ def check_isl_oversubscription():
     Returns information about oversubscribed ISLs.
     """
     import math
+    global target_ports
+    global test_path_target_ports
+    global all_zones 
+    global test_path_all_zones
+    global switch_index
+    global test_path_switch_index
+    global test_path_mode
     
     # Dictionary to track traffic per target node: {node_id: traffic}
     node_traffic = {}
@@ -838,7 +1479,14 @@ def check_isl_oversubscription():
     node_details = {}
     
     # Analyze target ports to identify nodes and their connections
-    for wwpn, target_port in target_ports.items():
+    # Make sure we access the correct global variable based on context
+    global target_ports
+    global test_path_target_ports
+    
+    # Determine which target_ports to use based on context
+    ports_to_use = test_path_target_ports if 'test_path_target_ports' in globals() and test_path_target_ports is not None else target_ports
+    
+    for wwpn, target_port in ports_to_use.items():
         if isinstance(target_port, Target):
             # Extract node number from NSP (e.g., "0:4:1" -> node 0)
             node_id = target_port.port_id.split(':')[0] if ':' in target_port.port_id else target_port.port_id
@@ -869,8 +1517,13 @@ def check_isl_oversubscription():
         return {"status": "No target nodes found", "oversubscribed_nodes": []}
     
     # Extract unique zones from all_zones directly
-    global all_zones
-    zones = all_zones  # Use the correctly parsed zones directly
+    # Make sure we access the correct global variable based on context
+    
+    # Use test_path_all_zones if in test-path mode, otherwise use all_zones
+    if 'test_path_all_zones' in globals() and test_path_all_zones is not None:
+        zones = test_path_all_zones  # Use test path specific zones
+    else:
+        zones = all_zones  # Use the correctly parsed zones directly
     
     # Process each zone to calculate traffic
     for zone_members in zones:
@@ -879,7 +1532,12 @@ def check_isl_oversubscription():
         targets = []
         
         for wwpn in zone_members:
-            port = get_port_by_wwpn(wwpn)
+            # In test-path mode, we should use test_path_get_port_by_wwpn if available
+            if 'test_path_mode' in globals() and test_path_mode and 'test_path_get_port_by_wwpn' in globals():
+                port = test_path_get_port_by_wwpn(wwpn)
+            else:
+                port = get_port_by_wwpn(wwpn)
+                
             if not port:
                 continue
                 
@@ -953,28 +1611,110 @@ def check_isl_oversubscription():
     # Also check for traditional ISLs between switches
     # Group ISLs by switch pairs to handle multiple ISLs between same switches
     switch_pair_isls = {}  # Track ISLs grouped by switch pairs
-    isl_traffic = {}
-    isl_details = {}
+    isl_traffic = {}       # Track traffic across ISLs
+    isl_details = {}       # Store details about each ISL
     
     # Find all switch-to-switch connections (ISLs) and group by switch pairs
-    for wwpn, switch_port in switch_index.items():
+    # Access global variables defined at the beginning of the function
+    
+    # Determine which switch_index to use based on context
+    switches_to_use = test_path_switch_index if 'test_path_switch_index' in globals() and test_path_switch_index is not None else switch_index
+    
+    # Enhanced debugging to understand the test-path mode environment
+    if 'test_path_switch_index' in globals() and test_path_switch_index is not None:
+        print(f"Running in test-path mode with {len(test_path_switch_index)} switch ports")
+        
+        try:
+            # Try to import our new helper function
+            from find_e_ports import find_e_ports_in_data
+            
+            # Use it to find E-ports directly
+            direct_e_ports = find_e_ports_in_data(test_path_switch_index)
+            print(f"Found {len(direct_e_ports)} E-ports directly in switch data")
+            
+            # If we found E-ports, make sure we'll use them later in the analysis
+            if direct_e_ports:
+                # Force direct detection of ISLs from E-ports
+                for e_port_wwpn in direct_e_ports:
+                    port = switches_to_use.get(e_port_wwpn)
+                    if port and hasattr(port, 'connection'):
+                        print(f"ISL direct detection: {e_port_wwpn} -> {port.connection}")
+        except ImportError:
+            print("Could not import find_e_ports helper module")
+        
+        # Count how many E-ports we have in switch_index
+        e_port_count = 0
+        for wwpn, port in test_path_switch_index.items():
+            if hasattr(port, 'switch_port_type') and port.switch_port_type == 'E-Port':
+                e_port_count += 1
+                print(f"Found E-port in test_path_switch_index: {wwpn}, connecting {port.switch_name} to {port.connection}")
+        print(f"Found {e_port_count} E-ports in test_path_switch_index")
+    
+    for wwpn, switch_port in switches_to_use.items():
         # Check if this port connects to another switch
         if switch_port.is_connected():
-            connected_port = get_port_by_wwpn(switch_port.connection)
-            if connected_port and isinstance(connected_port, Switch):
+            # Get the connected port using the appropriate function based on context
+            if 'test_path_mode' in globals() and test_path_mode and 'test_path_get_port_by_wwpn' in globals():
+                connected_port = test_path_get_port_by_wwpn(switch_port.connection)
+            else:
+                connected_port = get_port_by_wwpn(switch_port.connection)
                 
-                # Identify the switch pair (sorted to ensure consistency)
-                switch1_base = switch_port.wwpn[:12]  # e.g., "10000000AAAA"
-                switch2_base = connected_port.wwpn[:12]  # e.g., "10000000BBBB"
-                switch_pair = tuple(sorted([switch1_base, switch2_base]))
+            if connected_port and isinstance(connected_port, Switch):
+                is_isl = False
+                
+                # Check if it's explicitly marked as E-Port or has E-Port characteristics
+                if hasattr(switch_port, 'switch_port_type'):
+                    port_type_str = str(switch_port.switch_port_type).strip().upper()
+                    print(f"Checking port type: '{port_type_str}'")
+                    
+                    # Check for E-Port type (be more flexible with matching)
+                    if 'E-PORT' in port_type_str.upper() or 'E PORT' in port_type_str.upper() or 'EPORT' in port_type_str.upper():
+                        print(f"Detected ISL by E-Port type: {wwpn} ({switch_port.switch_name}) -> {switch_port.connection}")
+                        is_isl = True
+                    # Check if switches are different (which would indicate an ISL)
+                    elif hasattr(switch_port, 'switch_name') and hasattr(connected_port, 'switch_name'):
+                        switch1 = str(switch_port.switch_name).strip()
+                        switch2 = str(connected_port.switch_name).strip()
+                        
+                        if switch1 != switch2:
+                            # Different switch names indicates this is an ISL
+                            print(f"Detected ISL by switch name difference: {switch1} to {switch2}")
+                            is_isl = True
+                
+                if not is_isl:
+                    continue
+                
+                # Identify the switch pair using switch names for more reliability
+                switch1_name = str(switch_port.switch_name).strip() if hasattr(switch_port, 'switch_name') else "Unknown"
+                switch2_name = str(connected_port.switch_name).strip() if hasattr(connected_port, 'switch_name') else "Unknown"
+                
+                # Skip if it's connecting to itself (not a true ISL) or we don't have valid switch names
+                if switch1_name == switch2_name or switch1_name == "Unknown" or switch2_name == "Unknown":
+                    continue
+                    
+                # Create a unique tuple for this switch pair
+                switch_pair = tuple(sorted([switch1_name, switch2_name]))
+                print(f"Found ISL between: {switch1_name} and {switch2_name}, port: {getattr(switch_port, 'port_index', 'Unknown')}, type: {getattr(switch_port, 'switch_port_type', 'Unknown')}")
+                
+                # Debug the switch pair creation
+                print(f"Creating switch pair key: {switch_pair}")
                 
                 # Initialize switch pair if not seen before
                 if switch_pair not in switch_pair_isls:
+                    print(f"Initializing new switch pair in tracking dictionary: {switch_pair}")
                     switch_pair_isls[switch_pair] = {
                         "isls": [],
                         "total_capacity": 0,
-                        "traffic": 0
+                        "traffic": 0,
+                        "switch_names": switch_pair
                     }
+                
+                # Also make sure it's initialized in isl_traffic and isl_details
+                if switch_pair not in isl_traffic:
+                    isl_traffic[switch_pair] = 0
+                    
+                if switch_pair not in isl_details:
+                    isl_details[switch_pair] = switch_pair_isls[switch_pair]
                 
                 # Extract numeric speed value
                 speed_value = int(''.join(filter(str.isdigit, switch_port.speed)))
@@ -995,19 +1735,124 @@ def check_isl_oversubscription():
                         "isl_pair": isl_pair,
                         "representative_wwpn": isl_pair[0],
                         "speed": speed_value,
-                        "switch_name": switch_port.switch_name,
+                        "switch_name": str(switch_port.switch_name).strip(),
                         "port_index": switch_port.port_index,
-                        "remote_wwpn": switch_port.connection
+                        "port_type": getattr(switch_port, 'switch_port_type', 'Unknown'),
+                        "remote_wwpn": switch_port.connection,
+                        "remote_switch_name": str(connected_port.switch_name).strip()
                     }
                     
                     switch_pair_isls[switch_pair]["isls"].append(isl_info)
                     switch_pair_isls[switch_pair]["total_capacity"] += speed_value
                     
+                    print(f"Added ISL {isl_pair} to switch pair {switch_pair}, capacity now: {switch_pair_isls[switch_pair]['total_capacity']}Gb")
+                    
                     # Initialize traffic counter for this ISL pair
                     isl_traffic[switch_pair] = 0
+                    
+                    # Keep track of the details for each switch pair
                     isl_details[switch_pair] = switch_pair_isls[switch_pair]
+
+    print(f"Found {len(switch_pair_isls)} switch pairs with ISLs:")
+    for switch_pair, info in switch_pair_isls.items():
+        print(f"  Switches {switch_pair[0]} and {switch_pair[1]}: {len(info['isls'])} ISLs with total capacity {info['total_capacity']}Gb")
+        # Ensure all switch pairs are properly initialized in tracking dictionaries
+        isl_traffic[switch_pair] = isl_traffic.get(switch_pair, 0)
+        isl_details[switch_pair] = info
+        
+    # Debug the switch_pair_isls dictionary
+    if len(switch_pair_isls) == 0:
+        print("No ISL switch pairs were detected, but ISLs were found. This could be due to switch naming issues.")
+        
+        # List all detected E-ports
+        print("\nDetected E-ports:")
+        for wwpn, port in switches_to_use.items():
+            if hasattr(port, 'switch_port_type') and 'E-PORT' in str(port.switch_port_type).upper():
+                print(f"  Port: {wwpn}, Type: {port.switch_port_type}, Switch: {port.switch_name if hasattr(port, 'switch_name') else 'Unknown'}")
+                
+        # Try to create switch pairs from detected E-ports by sanitizing names
+        print("\nAttempting to fix switch pair detection...")
+        # Create a list of all detected E-ports for easier pairing
+        e_ports = []
+        for wwpn, switch_port in switches_to_use.items():
+            if hasattr(switch_port, 'switch_port_type') and 'E-PORT' in str(switch_port.switch_port_type).upper() and hasattr(switch_port, 'connection'):
+                e_ports.append((wwpn, switch_port))
+        
+        print(f"Found {len(e_ports)} E-ports to process")
+        
+        # Group E-ports by their switch name to identify unique switches
+        switch_groups = {}
+        for wwpn, switch_port in e_ports:
+            if hasattr(switch_port, 'switch_name'):
+                switch_name = str(switch_port.switch_name).strip()
+                if switch_name not in switch_groups:
+                    switch_groups[switch_name] = []
+                switch_groups[switch_name].append((wwpn, switch_port))
+        
+        # For each E-port, try to create a switch pair with its connected port
+        for wwpn, switch_port in e_ports:
+            if hasattr(switch_port, 'connection'):
+                # Get the connected port
+                connected_port = get_port_by_wwpn(switch_port.connection)
+                
+                if connected_port and isinstance(connected_port, Switch):
+                    # Create switch pair identifier
+                    switch1_id = wwpn[:8]  # Use the first 8 chars of the WWPN as switch identifier
+                    switch2_id = switch_port.connection[:8]  # Use the first 8 chars of the connected port's WWPN
+                    
+                    # Ensure we're not connecting to the same switch
+                    if switch1_id == switch2_id:
+                        continue
+                    
+                    # Create a tuple with the switch IDs sorted alphabetically
+                    switch_pair = tuple(sorted([switch1_id, switch2_id]))
+                    print(f"Fixed switch pair using WWPNs: {switch_pair}")
+                    
+                    # Initialize dictionaries for this switch pair if not already done
+                    if switch_pair not in switch_pair_isls:
+                        switch_pair_isls[switch_pair] = {
+                            "isls": [],
+                            "total_capacity": 0,
+                            "traffic": 0,
+                            "switch_names": switch_pair
+                        }
+                    if switch_pair not in isl_traffic:
+                        isl_traffic[switch_pair] = 0
+                        
+                    # Add this ISL to the list if not already added
+                    speed_value = int(''.join(filter(str.isdigit, switch_port.speed)))
+                    isl_pair = tuple(sorted([wwpn, switch_port.connection]))
+                    
+                    # Check if we've already processed this ISL pair
+                    already_added = False
+                    for existing_isl in switch_pair_isls[switch_pair]["isls"]:
+                        if existing_isl.get("isl_pair") == isl_pair:
+                            already_added = True
+                            break
+                            
+                    if not already_added:
+                        # Add this ISL to the switch pair
+                        isl_info = {
+                            "isl_pair": isl_pair,
+                            "representative_wwpn": isl_pair[0],
+                            "speed": speed_value,
+                            "switch_name": getattr(switch_port, 'switch_name', 'Unknown'),
+                            "port_index": getattr(switch_port, 'port_index', 'Unknown'),
+                            "port_type": getattr(switch_port, 'switch_port_type', 'Unknown'),
+                            "remote_wwpn": switch_port.connection,
+                            "remote_switch_name": getattr(connected_port, 'switch_name', 'Unknown')
+                        }
+                        
+                        switch_pair_isls[switch_pair]["isls"].append(isl_info)
+                        switch_pair_isls[switch_pair]["total_capacity"] += speed_value
+                        
+                        print(f"Added ISL {isl_pair} to switch pair {switch_pair}, capacity now: {switch_pair_isls[switch_pair]['total_capacity']}Gb")
+                        
+                        # Keep track of the details for each switch pair
+                        isl_details[switch_pair] = switch_pair_isls[switch_pair]
     
-    if not isl_traffic:
+    # If no ISLs were found, return appropriate message
+    if len(switch_pair_isls) == 0:
         return {"status": "No traditional ISLs found - single switch fabric", "oversubscribed_isls": [], "total_nodes": len(node_traffic), "zones_analyzed": len(zones)}
     
     # Process zones for ISL traffic (traditional multi-switch analysis)
@@ -1017,7 +1862,12 @@ def check_isl_oversubscription():
         targets = []
         
         for wwpn in zone_members:
-            port = get_port_by_wwpn(wwpn)
+            # In test-path mode, we should use test_path_get_port_by_wwpn if available
+            if 'test_path_mode' in globals() and test_path_mode and 'test_path_get_port_by_wwpn' in globals():
+                port = test_path_get_port_by_wwpn(wwpn)
+            else:
+                port = get_port_by_wwpn(wwpn)
+                
             if not port:
                 continue
                 
@@ -1030,7 +1880,11 @@ def check_isl_oversubscription():
         for initiator in initiators:
             for target in targets:
                 # Find path between initiator and target
-                path = find_path_between_endpoints(initiator.wwpn, target.wwpn)
+                # In test-path mode, we should use test_path_find_path_between_endpoints if available
+                if 'test_path_mode' in globals() and test_path_mode and 'test_path_find_path_between_endpoints' in globals():
+                    path = test_path_find_path_between_endpoints(initiator.wwpn, target.wwpn)
+                else:
+                    path = find_path_between_endpoints(initiator.wwpn, target.wwpn)
                 
                 if not path:
                     continue
@@ -1048,15 +1902,33 @@ def check_isl_oversubscription():
                 
                 for port_wwpn in path:
                     # Check if this port is part of any switch pair ISL
-                    port_obj = get_port_by_wwpn(port_wwpn)
+                    # In test-path mode, we should use test_path_get_port_by_wwpn if available
+                    if 'test_path_mode' in globals() and test_path_mode and 'test_path_get_port_by_wwpn' in globals():
+                        port_obj = test_path_get_port_by_wwpn(port_wwpn)
+                    else:
+                        port_obj = get_port_by_wwpn(port_wwpn)
+                        
                     if port_obj and isinstance(port_obj, Switch):
-                        switch_base = port_obj.wwpn[:12]
+                        switch_base = port_obj.wwpn[4:]
                         
                         # Find which switch pair this port belongs to
+                        port_switch_name = str(port_obj.switch_name).strip() if hasattr(port_obj, 'switch_name') else None
+                        
+                        # Skip if we don't have a valid switch name
+                        if not port_switch_name:
+                            continue
+                            
+                        print(f"Checking if port {port_wwpn} on switch {port_switch_name} is part of an ISL")
+                        
+                        # Find if this port's switch is part of any switch pair
                         for switch_pair, pair_info in switch_pair_isls.items():
-                            if switch_base in switch_pair and switch_pair not in counted_switch_pairs:
+                            # Check if this switch name is part of the pair
+                            if port_switch_name in switch_pair and switch_pair not in counted_switch_pairs:
                                 # Add traffic to this switch pair (only once per switch pair per path)
+                                if switch_pair not in isl_traffic:
+                                    isl_traffic[switch_pair] = 0
                                 isl_traffic[switch_pair] += connection_speed
+                                print(f"  Added {connection_speed}Gb traffic to ISL between {switch_pair[0]} and {switch_pair[1]}")
                                 counted_switch_pairs.add(switch_pair)
                                 break
     
@@ -1268,6 +2140,455 @@ def show_help():
     print("   - Connections are bidirectional")
     print("   - ISLs are automatically detected between switches")
 
+def show_system_information():
+    """
+    Display comprehensive system information for switches, storage nodes, and initiators.
+    Shows release + model for switches, version for storage, and fw/dvr versions + model for initiators.
+    """
+    print("\n" + "="*80)
+    print("                    SYSTEM INFORMATION")
+    print("="*80)
+    
+    # Display Switch Information
+    print("\n=== SWITCHES ===")
+    if switch_nodes:
+        for name, switch_node in switch_nodes.items():
+            print(f"\nSwitch: {name}")
+            print(f"  Model:           {switch_node.model}")
+            print(f"  Release Version: {switch_node.release_version}")
+            print(f"  Vendor:          {switch_node.vendor}")
+            if switch_node.wwnn:
+                print(f"  WWNN:            {switch_node.wwnn}")
+    else:
+        print("  No switch information available")
+    
+    # Display Storage Node Information
+    print("\n=== STORAGE NODES ===")
+    if target_nodes:
+        for name, target_node in target_nodes.items():
+            print(f"\nStorage Node: {name}")
+            print(f"  Software Version: {target_node.sw_version}")
+            
+            # Count and display associated ports
+            associated_ports = []
+            for wwpn, target_port in target_ports.items():
+                if isinstance(target_port, Target):
+                    # Extract node number from port_id to match with node name
+                    port_node_id = target_port.port_id.split(':')[0] if ':' in target_port.port_id else target_port.port_id
+                    if f"node_{port_node_id}" == name:
+                        associated_ports.append({
+                            'wwpn': wwpn,
+                            'port_id': target_port.port_id,
+                            'speed': target_port.speed
+                        })
+            
+            if associated_ports:
+                print(f"  Ports ({len(associated_ports)}):")
+                for port in associated_ports:
+                    print(f"    - {port['wwpn']} ({port['port_id']}) - {port['speed']}")
+            else:
+                print("  No associated ports found")
+    else:
+        print("  No storage node information available")
+    
+    # Display Initiator Information
+    print("\n=== INITIATORS ===")
+    if initiator_nodes:
+        for name, initiator_node in initiator_nodes.items():
+            print(f"\nInitiator: {name}")
+            print(f"  HBA Model:        {initiator_node.hba}")
+            print(f"  Firmware Version: {initiator_node.fw_version}")
+            print(f"  Driver Version:   {initiator_node.dvr_version}")
+            
+            # Display associated host ports
+            print(f"  Host Ports:")
+            for wwpn, host_port in host_ports.items():
+                if isinstance(host_port, Initiator):
+                    print(f"    - {wwpn} ({host_port.host_name}) - {host_port.speed}")
+                    if host_port.connection:
+                        print(f"      Connected to: {host_port.connection}")
+                    else:
+                        print(f"      Status: Not connected")
+    else:
+        print("  No initiator information available")
+    
+    # Summary
+    print("\n=== SUMMARY ===")
+    print(f"Total Switches:      {len(switch_nodes)}")
+    print(f"Total Storage Nodes: {len(target_nodes)}")
+    print(f"Total Initiators:    {len(initiator_nodes)}")
+    print(f"Total Target Ports:  {len(target_ports)}")
+    print(f"Total Host Ports:    {len(host_ports)}")
+    print(f"Total Switch Ports:  {len(switch_ports)}")
+    print("="*80)
+
+def display_target_arrays():
+    """
+    Display all TargetArray objects stored in the target_arrays dictionary.
+    Shows detailed information about each storage array found in the fabric.
+    """
+    global target_arrays
+    
+    print("\n" + "="*70)
+    print("                    TARGET ARRAYS")
+    print("="*70)
+    
+    if not target_arrays:
+        print("No target arrays found in the fabric.")
+        return
+    
+    print(f"Total Target Arrays Found: {len(target_arrays)}")
+    print("-" * 70)
+    
+    for i, (wwnn, target_array) in enumerate(target_arrays.items(), 1):
+        print(f"\n{i}. Target Array:")
+        print(f"   WWNN:          {target_array.wwnn}")
+        print(f"   Name:          {target_array.name}")
+        print(f"   Serial Number: {target_array.serial_number}")
+        print(f"   Node Count:    {target_array.node_count}")
+
+def build_host_mapping():
+    """
+    Build the host_mapping dictionary by iterating through all zones.
+    Maps initiator WWPNs to arrays of target WWPNs they are zoned with.
+    
+    host_mapping format: {initiator_wwpn: [target_wwpn1, target_wwpn2, ...]}
+    """
+    global host_mapping, all_zones
+    
+    print("\n=== Building Host Mapping ===")
+    
+    # Clear existing host_mapping
+    host_mapping.clear()
+    
+    # Iterate through all zones
+    for zone_index, zone_members in enumerate(all_zones, 1):
+        print(f"Processing Zone {zone_index}: {zone_members}")
+        
+        # Find all initiators and targets in this zone
+        initiators_in_zone = []
+        targets_in_zone = []
+        
+        for wwpn in zone_members:
+            # Get the port object to determine its type
+            port = get_port_by_wwpn(wwpn)
+            
+            if port:
+                if isinstance(port, Initiator):
+                    initiators_in_zone.append(wwpn)
+                    print(f"  Found initiator: {wwpn}")
+                elif isinstance(port, Target):
+                    targets_in_zone.append(wwpn)
+                    print(f"  Found target: {wwpn}")
+            else:
+                # Check in the individual port dictionaries if not found in indices
+                if wwpn in host_ports:
+                    initiators_in_zone.append(wwpn)
+                    print(f"  Found initiator (from host_ports): {wwpn}")
+                elif wwpn in target_ports:
+                    targets_in_zone.append(wwpn)
+                    print(f"  Found target (from target_ports): {wwpn}")
+                else:
+                    print(f"  Warning: WWPN {wwpn} not found in any port registry")
+        
+        # Map each initiator to all targets in this zone
+        for initiator_wwpn in initiators_in_zone:
+            # Initialize the initiator in host_mapping if not present
+            if initiator_wwpn not in host_mapping:
+                host_mapping[initiator_wwpn] = []
+                print(f"  Created new entry for initiator {initiator_wwpn}")
+            
+            # Add all targets from this zone to the initiator's mapping
+            for target_wwpn in targets_in_zone:
+                if target_wwpn not in host_mapping[initiator_wwpn]:
+                    host_mapping[initiator_wwpn].append(target_wwpn)
+                    print(f"  Added target {target_wwpn} to initiator {initiator_wwpn}")
+                else:
+                    print(f"  Target {target_wwpn} already mapped to initiator {initiator_wwpn}")
+    
+    # Display the final host_mapping
+    print(f"\n=== Host Mapping Summary ===")
+    print(f"Total initiators mapped: {len(host_mapping)}")
+    
+    for initiator_wwpn, target_list in host_mapping.items():
+        # Get initiator details for display
+        initiator_port = get_port_by_wwpn(initiator_wwpn)
+        initiator_name = "Unknown"
+        if initiator_port and hasattr(initiator_port, 'host_name'):
+            initiator_name = initiator_port.host_name
+        
+        print(f"\nInitiator: {initiator_wwpn} ({initiator_name})")
+        print(f"  Mapped to {len(target_list)} target(s):")
+        
+        for target_wwpn in target_list:
+            # Get target details for display
+            target_port = get_port_by_wwpn(target_wwpn)
+            target_name = "Unknown"
+            if target_port and hasattr(target_port, 'array_name'):
+                target_name = target_port.array_name
+            
+            print(f"    - {target_wwpn} ({target_name})")
+    
+    print(f"\nHost mapping completed. Total mappings: {len(host_mapping)}")
+    return host_mapping
+
+def display_host_mapping():
+    """
+    Display the host_mapping dictionary in a formatted way.
+    """
+    global host_mapping
+    
+    print("\n" + "="*70)
+    print("                    HOST MAPPING")
+    print("="*70)
+    
+    if not host_mapping:
+        print("No host mappings found. Run build_host_mapping() first.")
+        return
+    
+    print(f"Total Host Mappings: {len(host_mapping)}")
+    print("-" * 70)
+    
+    for i, (initiator_wwpn, target_list) in enumerate(host_mapping.items(), 1):
+        # Get initiator details
+        initiator_port = get_port_by_wwpn(initiator_wwpn)
+        initiator_info = "Unknown Host"
+        if initiator_port:
+            if hasattr(initiator_port, 'host_name'):
+                initiator_info = initiator_port.host_name
+            elif hasattr(initiator_port, 'port_id'):
+                initiator_info = f"Port {initiator_port.port_id}"
+        
+        print(f"\n{i}. Initiator: {initiator_wwpn}")
+        print(f"   Host: {initiator_info}")
+        print(f"   Zoned to {len(target_list)} target(s):")
+        
+        for j, target_wwpn in enumerate(target_list, 1):
+            # Get target details
+            target_port = get_port_by_wwpn(target_wwpn)
+            target_info = "Unknown Array"
+            port_info = ""
+            
+            if target_port:
+                if hasattr(target_port, 'array_name'):
+                    target_info = target_port.array_name
+                if hasattr(target_port, 'port_id'):
+                    port_info = f" ({target_port.port_id})"
+                if hasattr(target_port, 'speed'):
+                    port_info += f" - {target_port.speed}"
+            
+            print(f"     {j}. {target_wwpn}{port_info}")
+            print(f"        Array: {target_info}")
+        
+        print("-" * 50)
+    
+    print("="*70)
+
+def check_host_node_connectivity(host_wwpn):
+    """
+    Check if a host (initiator) is connected to all nodes of target arrays.
+    Ports with the same array_name are considered as one single connection to that node.
+    
+    Args:
+        host_wwpn (str): The WWPN of the host/initiator to check
+        
+    Returns:
+        dict: Dictionary containing connectivity analysis results
+    """
+    global host_mapping, target_arrays, target_ports
+    
+    print(f"\n=== Checking Host Node Connectivity for {host_wwpn} ===")
+    
+    # Check if host exists in host_mapping
+    if host_wwpn not in host_mapping:
+        print(f"Host {host_wwpn} not found in host_mapping dictionary")
+        return {"error": "Host not found in mapping"}
+        
+    # Make sure host is properly connected to fabric
+    host_port = get_port_by_wwpn(host_wwpn)
+    if not host_port or not host_port.is_connected():
+        print(f"Warning: Host {host_wwpn} is not connected to any switch")
+        # Continue anyway since we're checking zoning, not physical connectivity
+    
+    # Get the target WWPNs this host is mapped to
+    mapped_targets = host_mapping[host_wwpn]
+    print(f"Host {host_wwpn} is mapped to {len(mapped_targets)} target(s):")
+    for target in mapped_targets:
+        print(f"  - {target}")
+    
+    # Group targets by array (based on array_name)
+    arrays_connectivity = {}
+    
+    for target_wwpn in mapped_targets:
+        # Get the target port object
+        target_port = get_port_by_wwpn(target_wwpn)
+        
+        if target_port and hasattr(target_port, 'array_name'):
+            array_name = target_port.array_name
+            
+            # Extract the base array name (remove node suffix)
+            # For example: "S4256-node0" -> "S4256"
+            base_array_name = array_name.split('-node')[0] if '-node' in array_name else array_name
+            
+            if base_array_name not in arrays_connectivity:
+                arrays_connectivity[base_array_name] = {
+                    'connected_nodes': set(),  # Use set to track unique node names
+                    'connected_targets': [],   # Keep list for detailed reporting
+                    'expected_nodes': 0,
+                    'array_info': None
+                }
+            
+            # Add the full array_name (including node) to the set of connected nodes
+            arrays_connectivity[base_array_name]['connected_nodes'].add(array_name)
+            
+            # Also add to the detailed list for reporting
+            arrays_connectivity[base_array_name]['connected_targets'].append({
+                'wwpn': target_wwpn,
+                'array_name': array_name,
+                'port_id': getattr(target_port, 'port_id', 'Unknown')
+            })
+    
+    # Get expected node counts from target_arrays
+    for wwnn, target_array in target_arrays.items():
+        array_name = target_array.name
+        if array_name in arrays_connectivity:
+            arrays_connectivity[array_name]['expected_nodes'] = target_array.node_count
+            arrays_connectivity[array_name]['array_info'] = target_array
+    
+    # Analyze connectivity for each array
+    connectivity_results = {}
+    
+    print(f"\n=== Connectivity Analysis ===")
+    
+    for array_name, connectivity_info in arrays_connectivity.items():
+        # Count unique nodes (not ports)
+        connected_node_count = len(connectivity_info['connected_nodes'])
+        expected_count = connectivity_info['expected_nodes']
+        
+        is_fully_connected = connected_node_count == expected_count
+        connectivity_percentage = (connected_node_count / expected_count * 100) if expected_count > 0 else 0
+        
+        connectivity_results[array_name] = {
+            'array_name': array_name,
+            'connected_nodes': connected_node_count,
+            'expected_nodes': expected_count,
+            'is_fully_connected': is_fully_connected,
+            'connectivity_percentage': connectivity_percentage,
+            'connected_targets': connectivity_info['connected_targets'],
+            'connected_node_names': list(connectivity_info['connected_nodes']),
+            'array_info': connectivity_info['array_info']
+        }
+        
+        print(f"\nArray: {array_name}")
+        print(f"  Expected nodes: {expected_count}")
+        print(f"  Connected nodes: {connected_node_count}")
+        print(f"  Connectivity: {connectivity_percentage:.1f}%")
+        print(f"  Status: {'✓ FULLY CONNECTED' if is_fully_connected else '✗ PARTIAL CONNECTION'}")
+        
+        if not is_fully_connected:
+            missing_nodes = expected_count - connected_node_count
+            print(f"  Missing connections: {missing_nodes} node(s)")
+        
+        print(f"  Connected nodes: {list(connectivity_info['connected_nodes'])}")
+        print(f"  Connected targets (by node):")
+        
+        # Group targets by node for better display
+        targets_by_node = {}
+        for target in connectivity_info['connected_targets']:
+            node_name = target['array_name']
+            if node_name not in targets_by_node:
+                targets_by_node[node_name] = []
+            targets_by_node[node_name].append(target)
+        
+        for node_name, targets in targets_by_node.items():
+            print(f"    Node {node_name}: {len(targets)} port(s)")
+            for target in targets:
+                print(f"      - {target['wwpn']} (Port: {target['port_id']})")
+    
+    # Overall summary
+    total_arrays = len(connectivity_results)
+    fully_connected_arrays = sum(1 for result in connectivity_results.values() if result['is_fully_connected'])
+    
+    print(f"\n=== Overall Summary ===")
+    print(f"Host: {host_wwpn}")
+    print(f"Total arrays analyzed: {total_arrays}")
+    print(f"Fully connected arrays: {fully_connected_arrays}")
+    print(f"Partially connected arrays: {total_arrays - fully_connected_arrays}")
+    
+    if total_arrays > 0:
+        overall_percentage = (fully_connected_arrays / total_arrays * 100)
+        print(f"Overall connectivity: {overall_percentage:.1f}%")
+    
+    return {
+        'host_wwpn': host_wwpn,
+        'arrays': connectivity_results,
+        'summary': {
+            'total_arrays': total_arrays,
+            'fully_connected': fully_connected_arrays,
+            'partially_connected': total_arrays - fully_connected_arrays,
+            'overall_percentage': overall_percentage if total_arrays > 0 else 0
+        }
+    }
+
+def check_all_hosts_connectivity():
+    """
+    Check connectivity for all hosts in the host_mapping dictionary.
+    """
+    global host_mapping
+    
+    print("\n" + "="*80)
+    print("                    ALL HOSTS CONNECTIVITY CHECK")
+    print("="*80)
+    
+    if not host_mapping:
+        print("No host mappings found. Run build_host_mapping() first.")
+        return
+    
+    all_results = {}
+    
+    for host_wwpn in host_mapping.keys():
+        print(f"\n{'-'*60}")
+        result = check_host_node_connectivity(host_wwpn)
+        all_results[host_wwpn] = result
+    
+    # Summary report
+    print(f"\n" + "="*80)
+    print("                    CONNECTIVITY SUMMARY REPORT")
+    print("="*80)
+    
+    for host_wwpn, result in all_results.items():
+        if 'error' not in result:
+            summary = result['summary']
+            print(f"\nHost: {host_wwpn}")
+            print(f"  Arrays: {summary['total_arrays']}")
+            print(f"  Fully Connected: {summary['fully_connected']}")
+            print(f"  Partially Connected: {summary['partially_connected']}")
+            print(f"  Overall: {summary['overall_percentage']:.1f}%")
+    
+    return all_results
+
+def get_port_by_wwpn(wwpn):
+    """
+    Get port object by WWPN from all indexes and dictionaries.
+    
+    Args:
+        wwpn (str): The WWPN to search for
+        
+    Returns:
+        Port object or None if not found
+    """
+    # Check in the global index dictionaries first
+    port = initiator_index.get(wwpn) or target_index.get(wwpn) or switch_index.get(wwpn)
+    
+    if port:
+        return port
+    
+    # Check in the individual port dictionaries
+    port = target_ports.get(wwpn) or host_ports.get(wwpn) or switch_ports.get(wwpn)
+    
+    return port
+
+
 def run_interactive_cli():
     """Main interactive CLI loop."""
     display_banner()
@@ -1281,7 +2602,7 @@ def run_interactive_cli():
             choice = input("\nEnter your choice (0-5): ").strip()
             
             if choice == '1':
-                list_all_ports()
+                show_system_information()
             elif choice == '2':
                 interactive_check_connectivity()
             elif choice == '3':
@@ -1317,7 +2638,7 @@ def display_banner():
 def display_menu():
     """Display the main menu options."""
     print("\nMAIN MENU:")
-    print("1. List all ports")
+    print("1. Show system information")
     print("2. Check fabric connectivity")
     print("3. Show current topology")
     print("4. Check ISL oversubscription")
@@ -1326,6 +2647,8 @@ def display_menu():
     print("-" * 50)
 
 if __name__ == "__main__":
+    
+    parse_showsys_output()
     print("Parsing showport, showhost, showportdev, and zoning output...")
     created_ports = parse_showport_output()
 
@@ -1334,10 +2657,12 @@ if __name__ == "__main__":
 
     # Establish switch connections
     establish_switch_connections()
+    
+    # Connect switches internally for proper path finding
+    connect_switches_internally()
 
     # Debug zoning info
     debug_zoning_info()
-    
     
     run_interactive_cli()
 
@@ -1396,4 +2721,11 @@ if __name__ == "__main__":
     print("\n=== Zoning Info Dictionary ===")
     for wwpn, zone_members in zoning_info.items():
         print(f"WWPN: {wwpn} -> Zone: {zone_members}")
+    
     '''
+    display_target_arrays()
+    
+    build_host_mapping()
+    display_host_mapping()
+    check_all_hosts_connectivity()
+

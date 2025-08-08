@@ -1,0 +1,97 @@
+
+showport output:
+0:1:1 | target | ready | 2FF70002AC07EEEB | 20110002AC07EEEB | host | FC | -
+0:4:1 | target | ready | 2FF70002AC07EEEB | 20410002AC07EEEB | host | FC | -
+1:1:1 | target | ready | 2FF70002AC07EEEB | 21110002AC07EEEB | host | FC | -
+1:4:1 | target | ready | 2FF70002AC07EEEB | 21410002AC07EEEB | host | FC | -
+
+
+showhost output:
+51402EC0203C6C6C
+
+showportdev fcfabric 0:3:1 | grep "Online" command output:
+0  | 2000D81FCCC44E48 | F-Port | Online | 32Gbps | 20110002AC07EEEB | N-Port
+0  | 2000D81FCCC44E48 | F-Port | Online | 32Gbps | 20110102ADF7EEEB | N-Port
+3  | 2003D81FCCC44E48 | F-Port | Online | 32Gbps | 51402EC0203C6BBC | N-Port
+6  | 2006D81FCCC44E48 | F-Port | Online | 32Gbps | 10005CBA2CFD3912 | N-Port
+7  | 2007D81FCCC44E48 | F-Port | Online | 32Gbps  | 20310002AC07EE88 | N-Port
+7  | 2007D81FCCC44E48 | F-Port | Online | 32Gbps  | 20310102ADF7EE88 | N-Port
+8  | 2008D81FCCC44E48 | F-Port | Online | 32Gbps | 1000B47AF16E24D2 | N-Port
+10 | 200AD81FCCC44E48 | F-Port | Online | 32Gbps | 51402EC0203C6C6C | N-Port
+11 | 200BD81FCCC44E48 | F-Port | Online | 32Gbps  | 21310002AC07EE88 | N-Port
+11 | 200BD81FCCC44E48 | F-Port | Online | 32Gbps  | 21310102ADF7EE88 | N-Port
+13 | 200DD81FCCC44E48 | F-Port | Online | 32Gbps | 10005CBA2CFD2978 | N-Port
+15 | 200FD81FCCC44E48 | F-Port | Online | 32Gbps  | 20110002AC07EEED | N-Port
+15 | 200FD81FCCC44E48 | F-Port | Online | 32Gbps  | 20110102ADF7EEED | N-Port
+16 | 2010D81FCCC44E48 | F-Port | Online | 32Gbps | 51402EC0181DA098 | N-Port
+18 | 2012D81FCCC44E48 | F-Port | Online | 32Gbps | 21110002AC07EEEB | N-Port
+18 | 2012D81FCCC44E48 | F-Port | Online | 32Gbps | 21110102ADF7EEEB | N-Port
+19 | 2013D81FCCC44E48 | E-Port | Online | 32Gbps | 200038BAB0767200 | E-Port
+20 | 2014D81FCCC44E48 | F-Port | Online | 32Gbps  | 21110002AC07EEED | N-Port
+20 | 2014D81FCCC44E48 | F-Port | Online | 32Gbps  | 21110102ADF7EEED | N-Port
+21 | 2015D81FCCC44E48 | F-Port | Online | 32Gbps | 10005CBA2CFD298A | N-Port
+22 | 2016D81FCCC44E48 | F-Port | Online | 32Gbps | 51402EC0203CFA84 | N-Port
+23 | 2017D81FCCC44E48 | E-Port | Online | 32Gbps | 200138BAB0767200 | E-Port
+24 | 2018D81FCCC44E48 | F-Port | Online | 32Gbps | 20410002AC07EEEB | N-Port
+24 | 2018D81FCCC44E48 | F-Port | Online | 32Gbps | 20410102ADF7EEEB | N-Port
+27 | 201BD81FCCC44E48 | F-Port | Online | 32Gbps  | 1000B47AF16DC567 | N-Port
+28 | 201CD81FCCC44E48 | F-Port | Online | 32Gbps | 200200110D013300 | N-Port
+29 | 201DD81FCCC44E48 | F-Port | Online | 32Gbps | 200300110D013400 | N-Port
+30 | 201ED81FCCC44E48 | F-Port | Online | 32Gbps | 200000110DF06300 | N-Port
+30 | 201ED81FCCC44E48 | F-Port | Online | 32Gbps | 200000110DF06301 | N-Port
+30 | 201ED81FCCC44E48 | F-Port | Online | 32Gbps | 200000110DF06302 | N-Port
+30 | 201ED81FCCC44E48 | F-Port | Online | 32Gbps | 200000110DF06303 | N-Port
+30 | 201ED81FCCC44E48 | F-Port | Online | 32Gbps | 200000110DF06304 | N-Port
+30 | 201ED81FCCC44E48 | F-Port | Online | 32Gbps | 200000110DF06305 | N-Port
+30 | 201ED81FCCC44E48 | F-Port | Online | 32Gbps | 200000110DF06306 | N-Port
+30 | 201ED81FCCC44E48 | F-Port | Online | 32Gbps | 200000110DF06307 | N-Port
+30 | 201ED81FCCC44E48 | F-Port | Online | 32Gbps | 200000110DF06308 | N-Port
+30 | 201ED81FCCC44E48 | F-Port | Online | 32Gbps | 200000110DF06309 | N-Port
+31 | 201FD81FCCC44E48 | F-Port | Online | 32Gbps | 200100110DF06400 | N-Port
+0  | 200038BAB0767200 | E-Port | Online | 32Gbps | 2013D81FCCC44E48 | E-Port
+1  | 200138BAB0767200 | E-Port | Online | 32Gbps | 2017D81FCCC44E48 | E-Port
+4  | 200438BAB0767200 | F-Port | Online | 32Gbps | 20310002AC07EEE1 | N-Port
+4  | 200438BAB0767200 | F-Port | Online | 32Gbps | 20310102ADF7EEE1 | N-Port
+5  | 200538BAB0767200 | F-Port | Online | 32Gbps | 21310002AC07EEE1 | N-Port
+5  | 200538BAB0767200 | F-Port | Online | 32Gbps | 21310102ADF7EEE1 | N-Port
+6  | 200638BAB0767200 | F-Port | Online | 32Gbps | 21410002AC07EEEB | N-Port
+6  | 200638BAB0767200 | F-Port | Online | 32Gbps | 21410102ADF7EEEB | N-Port
+15 | 200F38BAB0767200 | F-Port | Online | 32Gbps  | 51402EC0017CAC64 | N-Port
+
+
+
+zoning info:
+zone 1:
+51402EC0203C6C6C
+20110002AC07EEEB
+zone 2:
+51402EC0203C6C6C
+20410002AC07EEEB
+zone 3:
+51402EC0203C6C6C
+21110002AC07EEEB
+zone 4
+51402EC0203C6C6C
+21410002AC07EEEB
+
+Node information variables:
+node_count = 2
+node_version = 10.6.0.12
+
+
+host_info = SN1610Q FW:v9.12.01 DVR:v10.02.10.00-k1-debug
+
+Switch info:
+switch_1_name = 1000D81FCCC44E48
+switch_1_logical_name = m2-sn6700b-07
+switch_1_vendor = Brocade Communications, Inc.
+switch_1_model = 181.0
+switch_1_release = v9.0.1c
+switch_2_name = 100038BAB0767200
+switch_2_logical_name = m2-sn6700b-09
+switch_2_vendor = Brocade Communications, Inc.
+switch_2_model = 181.0
+switch_2_release = v9.1.1b
+
+
+
