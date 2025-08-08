@@ -2119,7 +2119,7 @@ def display_isl_oversubscription_analysis():
     
     # Handle switch pair ISL oversubscription
     if "total_switch_pairs" in analysis:
-        print(f"\nFound {analysis['total_isls']} ISLs across {analysis['total_switch_pairs']} switch pairs in fabric.")
+        print(f"\nFound {analysis['total_isls']//2} ISLs in fabric.")
         
         if "oversubscribed_isls" in analysis and analysis["oversubscribed_isls"]:
             print(f"Detected {len(analysis['oversubscribed_isls'])} oversubscribed switch pairs:")
