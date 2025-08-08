@@ -674,7 +674,14 @@ def connect_switches_internally():
         if hasattr(switch_port, 'switch_port_type') and switch_port.switch_port_type.upper() in ("E-PORT", "E PORT") and switch_port.is_connected():
             connected_port = get_port_by_wwpn(switch_port.connection)
             if connected_port and isinstance(connected_port, Switch):
-                print(f"Found ISL: {wwpn} -> {switch_port.connection}")
+                port_type1 = switch_port.switch_port_type if hasattr(switch_port, 'switch_port_type') else "Unknown"
+                port_type2 = connected_port.switch_port_type if hasattr(connected_port, 'switch_port_type') else "Unknown"
+                switch1 = switch_port.switch_name if hasattr(switch_port, 'switch_name') else "Unknown"
+                switch2 = connected_port.switch_name if hasattr(connected_port, 'switch_name') else "Unknown"
+                speed = switch_port.speed if hasattr(switch_port, 'speed') else "Unknown"
+                
+                print(f"Found ISL: {wwpn} ({port_type1}) -> {switch_port.connection} ({port_type2})")
+                print(f"    Connection between switch {switch1} and {switch2} at {speed}")
                 
                 # Connect all ports in switch1 to all ports in switch2 through the ISL
                 for port1_wwpn, port1 in switch_index.items():
@@ -814,10 +821,25 @@ def check_fabric_connectivity(source_wwpn, destination_wwpn):
         print("SUCCESS: Path found!")
         print("Path details:")
         
+        # Find switch boundaries for better visualization of ISL crossings
+        switch_transitions = []
+        current_switch = None
+        
+        for i, wwpn in enumerate(path):
+            port = get_port_by_wwpn(wwpn)
+            if isinstance(port, Switch):
+                switch_name = getattr(port, 'switch_name', None)
+                if switch_name and switch_name != current_switch:
+                    if current_switch is not None:  # Not the first switch
+                        switch_transitions.append(i)
+                    current_switch = switch_name
+        
+        # Print path with enhanced ISL visibility
         for i, wwpn in enumerate(path):
             port = get_port_by_wwpn(wwpn)
             port_info = ""
             
+            # Create descriptive port info
             if isinstance(port, Initiator):
                 port_info = f"Initiator ({port.host_name})"
             elif isinstance(port, Target):
@@ -830,14 +852,60 @@ def check_fabric_connectivity(source_wwpn, destination_wwpn):
             # Add speed information
             port_info += f" - {port.speed}"
             
+            # Special formatting for ISL connections
+            is_isl_entry = False
+            is_isl_exit = False
+            
+            # Determine if this is an ISL entry or exit point
+            if isinstance(port, Switch) and hasattr(port, 'switch_port_type'):
+                if i < len(path) - 1:
+                    next_port = get_port_by_wwpn(path[i+1])
+                    if isinstance(next_port, Switch) and hasattr(next_port, 'switch_port_type'):
+                        if (port.switch_name != next_port.switch_name or  # Different switches
+                            (hasattr(port, 'switch_port_type') and 'E-PORT' in port.switch_port_type.upper()) or
+                            (hasattr(next_port, 'switch_port_type') and 'E-PORT' in next_port.switch_port_type.upper())):
+                            is_isl_exit = True
+                
+                if i > 0:
+                    prev_port = get_port_by_wwpn(path[i-1])
+                    if isinstance(prev_port, Switch) and hasattr(prev_port, 'switch_port_type'):
+                        if (port.switch_name != prev_port.switch_name or  # Different switches
+                            (hasattr(port, 'switch_port_type') and 'E-PORT' in port.switch_port_type.upper()) or
+                            (hasattr(prev_port, 'switch_port_type') and 'E-PORT' in prev_port.switch_port_type.upper())):
+                            is_isl_entry = True
+            
+            # Output with connection information
             if i < len(path) - 1:
                 next_port = get_port_by_wwpn(path[i+1])
                 
-                # Show speed connection info without warnings
+                # Show speed connection info
                 speed_info = f" ({port.speed} → {next_port.speed})"
+                
+                # Base output
+                output_line = f"  {i+1}. {wwpn} - {port_info} connected to {next_port.wwpn}{speed_info}"
+                print(output_line)
+                
+                # Special ISL crossing indicator
+                if i+1 in switch_transitions:
+                    # Get the ISL port details for current and next port
+                    port_details = f"{port.wwpn}"
+                    next_port_details = f"{next_port.wwpn}"
                     
-                print(f"  {i+1}. {wwpn} - {port_info} connected to {next_port.wwpn}{speed_info}")
-                print(f"     |")
+                    if hasattr(port, 'switch_port_type'):
+                        port_details += f" ({port.switch_port_type})"
+                    if hasattr(next_port, 'switch_port_type'):
+                        next_port_details += f" ({next_port.switch_port_type})"
+                    
+                    print(f"     |")
+                    print(f"     ⭇ ISL CROSSING - Inter-Switch Link ⭆")
+                    print(f"       From: {port_details} -> To: {next_port_details}")
+                    print(f"     |")
+                elif is_isl_exit:
+                    print(f"     | (Exiting switch via E-Port: {port.wwpn})")
+                elif is_isl_entry:
+                    print(f"     | (Entering switch via E-Port: {port.wwpn})")
+                else:
+                    print(f"     |")
             else:
                 print(f"  {i+1}. {wwpn} - {port_info}")
         
