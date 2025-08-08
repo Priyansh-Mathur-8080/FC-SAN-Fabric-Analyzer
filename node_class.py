@@ -63,7 +63,7 @@ class InitiatorNode:
     Represents an initiator node (host server) in a Fibre Channel SAN network.
     """
     
-    def __init__(self, name=None, hba=None, fw_version=None):
+    def __init__(self, name=None, hba=None, fw_version=None, dvr_version=None):
         """
         Initialize an InitiatorNode instance.
         
@@ -75,6 +75,7 @@ class InitiatorNode:
         self.name = name
         self.hba = hba
         self.fw_version = fw_version
+        self.dvr_version = dvr_version
     
     def __str__(self):
         """String representation of the initiator node."""
